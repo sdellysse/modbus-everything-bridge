@@ -1,0 +1,10 @@
+[Service]
+Type=simple
+Restart=always
+User=user
+Group=user
+WorkingDirectory=/home/user/src/battery2mqtt
+ExecStart=/usr/bin/fish -ic 'npm start'
+
+[Install]
+WantedBy=multi-user.target
