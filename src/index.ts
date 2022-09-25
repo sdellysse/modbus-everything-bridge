@@ -1,50 +1,60 @@
 import Modbus from "modbus-serial";
 import Mqtt from "async-mqtt";
-import { log, pMapSeries, queryModbus, runForever } from "./utils";
+import CRC32 from "crc-32";
+import { log, queryModbus, runForever, uniqueStrings } from "./utils";
 
 const servers = <const>[48, 49, 50, 51];
 const homeAssistantConfigs = <const>{
   amperage: {
     device_class: "current",
+    name: "Amperage",
     state_class: "measurement",
     unit_of_measurement: "A",
   },
+  cycleNumber: {
+    entity_category: "diagnostic",
+    name: "Cycle Number",
+    state_class: "measurement",
+  },
   energy: {
     device_class: "battery",
+    name: "Energy",
     state_class: "measurement",
     unit_of_measurement: "%",
   },
   energy_capacity: {
     device_class: "energy",
+    name: "Energy Capacity",
     state_class: "measurement",
     unit_of_measurement: "Wh",
   },
   energy_remaining: {
     device_class: "energy",
+    name: "Energy Remaining",
     state_class: "measurement",
     unit_of_measurement: "Wh",
   },
   power: {
     device_class: "power",
+    name: "Power",
     state_class: "measurement",
     unit_of_measurement: "W",
   },
   time_to_empty: {
     device_class: "duration",
+    name: "Time To Empty",
     unit_of_measurement: "h",
   },
   time_to_full: {
     device_class: "duration",
+    name: "Time To Full",
     unit_of_measurement: "h",
   },
   voltage: {
     device_class: "voltage",
+    name: "Voltage",
     state_class: "measurement",
     unit_of_measurement: "V",
-  },
-  cycleNumber: {
-    entity_category: "diagnostic",
-    state_class: "measurement",
   },
 };
 
@@ -149,7 +159,7 @@ const queryServer = async (modbusConn: Modbus, server: number) => {
 };
 type ServerData = Awaited<ReturnType<typeof queryServer>>;
 
-const batteryModuleOf = (data: ServerData) => {
+const moduleOf = (data: ServerData) => {
   return {
     ...data,
     energy: 100.0 * (data.energyRemaining / data.energyCapacity),
@@ -162,58 +172,87 @@ const batteryModuleOf = (data: ServerData) => {
       data.amperage < 0 ? Math.abs(data.energyRemaining / data.amperage) : 0,
   };
 };
-type BatteryModule = Awaited<ReturnType<typeof batteryModuleOf>>;
+type Module = Awaited<ReturnType<typeof moduleOf>>;
 
-const batteryOf = (batteryModules: Array<BatteryModule>) => {
+const batteryOf = (modules: Array<Module>) => {
   let sums = {
     amperage: 0,
     cycleNumber: 0,
     energy: 0,
     energyCapacity: 0,
     energyRemaining: 0,
+    manufacturerName: <Array<string>>[],
+    model: <Array<string>>[],
     power: 0,
+    serial: <Array<string>>[],
     timeToEmpty: 0,
     timeToFull: 0,
     voltage: 0,
   };
-  for (const battery of batteryModules) {
+  for (const module of modules) {
     sums = {
-      amperage: sums.amperage + battery.amperage,
-      cycleNumber: sums.cycleNumber + battery.cycleNumber,
-      energy: sums.energy + battery.energy,
-      energyCapacity: sums.energyCapacity + battery.energyCapacity,
-      energyRemaining: sums.energyRemaining + battery.energyRemaining,
-      power: sums.power + battery.power,
-      timeToEmpty: sums.timeToEmpty + battery.timeToEmpty,
-      timeToFull: sums.timeToFull + battery.timeToFull,
-      voltage: sums.voltage + battery.voltage,
+      amperage: sums.amperage + module.amperage,
+      cycleNumber: sums.cycleNumber + module.cycleNumber,
+      energy: sums.energy + module.energy,
+      energyCapacity: sums.energyCapacity + module.energyCapacity,
+      energyRemaining: sums.energyRemaining + module.energyRemaining,
+      manufacturerName: [...sums.manufacturerName, module.manufacturerName],
+      model: [...sums.model, module.model],
+      power: sums.power + module.power,
+      serial: [...sums.serial, module.serial],
+      timeToEmpty: sums.timeToEmpty + module.timeToEmpty,
+      timeToFull: sums.timeToFull + module.timeToFull,
+      voltage: sums.voltage + module.voltage,
     };
   }
 
   return <const>{
-    ...sums,
-    cycleNumber: sums.cycleNumber / batteryModules.length,
-    energy: sums.energy / batteryModules.length,
-    power: sums.power / batteryModules.length,
-    timeToEmpty: sums.timeToEmpty / batteryModules.length,
-    timeToFull: sums.timeToFull / batteryModules.length,
-    voltage: sums.voltage / batteryModules.length,
+    battery: {
+      ...sums,
+      cycleNumber: sums.cycleNumber / modules.length,
+      energy: sums.energy / modules.length,
+      manufacturerName: uniqueStrings(sums.manufacturerName)
+        .sort((l, r) => l.localeCompare(r))
+        .join("."),
+      model: uniqueStrings(sums.model)
+        .sort((l, r) => l.localeCompare(r))
+        .join("."),
+      power: sums.power / modules.length,
+      serial: Math.abs(
+        CRC32.str(
+          uniqueStrings(sums.serial)
+            .sort((l, r) => l.localeCompare(r))
+            .join(".")
+        )
+      ),
+      timeToEmpty: sums.timeToEmpty / modules.length,
+      timeToFull: sums.timeToFull / modules.length,
+      voltage: sums.voltage / modules.length,
+    },
+    modules,
   };
 };
 type Battery = Awaited<ReturnType<typeof batteryOf>>;
 
-const publishBatteryConfigs = async (mqttConn: Mqtt.AsyncMqttClient) => {
+const publishBatteryConfigs = async (
+  mqttConn: Mqtt.AsyncMqttClient,
+  battery: Battery
+) => {
   for (const [property, props] of Object.entries(homeAssistantConfigs)) {
-    const topic = `homeassistant/sensor/battery_${property}/config`;
+    const topic = `homeassistant/sensor/battery_${battery.battery.serial}_${property}/config`;
     const payload = JSON.stringify(
       {
         ...props,
         device: {
-          identifiers: "battery",
+          identifiers: [battery.battery.serial],
+          manufacturer: battery.battery.manufacturerName,
+          model: battery.battery.model,
+          name: `Battery ${battery.battery.serial}`,
         },
-        object_id: `battery_${property}`,
-        state_topic: `homeassistant/sensor/battery_${property}/state`,
-        unique_id: `battery_${property}`,
+        name: `Battery ${battery.battery.serial} ${props.name}`,
+        object_id: `battery_${battery.battery.serial}_${property}`,
+        state_topic: `battery/battery/${battery.battery.serial}/${property}`,
+        unique_id: `battery_${battery.battery.serial}_${property}`,
       },
       undefined,
       4
@@ -223,23 +262,25 @@ const publishBatteryConfigs = async (mqttConn: Mqtt.AsyncMqttClient) => {
     await mqttConn.publish(topic, payload, { retain: true });
   }
 };
-const publishBatteryModuleConfigs = async (
+const publishModuleConfigs = async (
   mqttConn: Mqtt.AsyncMqttClient,
-  batteryModule: BatteryModule
+  module: Module
 ) => {
   for (const [property, props] of Object.entries(homeAssistantConfigs)) {
-    const topic = `homeassistant/sensor/batterymodule_${batteryModule.serial}_${property}/config`;
+    const topic = `homeassistant/sensor/batterymodule_${module.serial}_${property}/config`;
     const payload = JSON.stringify(
       {
         ...props,
         device: {
-          identifiers: [batteryModule.serial],
-          manufacturer: batteryModule.manufacturerName,
-          model: batteryModule.model,
+          identifiers: [module.serial],
+          manufacturer: module.manufacturerName,
+          model: module.model,
+          name: `Battery Module ${module.serial}`,
         },
-        object_id: `batterymodule_${batteryModule.serial}_${property}`,
-        state_topic: `homeassistant/sensor/batterymodule_${batteryModule.serial}_${property}/state`,
-        unique_id: `batterymodule_${batteryModule.serial}_${property}`,
+        name: `Battery Module ${module.serial} ${props.name}`,
+        object_id: `batterymodule_${module.serial}_${property}`,
+        state_topic: `battery/modules/${module.serial}/${property}`,
+        unique_id: `batterymodule_${module.serial}_${property}`,
       },
       undefined,
       4
@@ -255,32 +296,38 @@ const publishBatteryStates = async (
   battery: Battery
 ) => {
   const dict = {
-    amperage: battery.amperage.toFixed(2),
-    cycleNumber: battery.cycleNumber.toFixed(2),
-    energy: battery.energy.toFixed(2),
-    energy_capacity: (battery.energyCapacity * battery.voltage).toFixed(3),
-    energy_remaining: (battery.energyRemaining * battery.voltage).toFixed(3),
-    power: battery.power.toFixed(2),
+    amperage: battery.battery.amperage.toFixed(2),
+    cycleNumber: battery.battery.cycleNumber.toFixed(2),
+    energy: battery.battery.energy.toFixed(2),
+    energy_capacity: (
+      battery.battery.energyCapacity * battery.battery.voltage
+    ).toFixed(3),
+    energy_remaining: (
+      battery.battery.energyRemaining * battery.battery.voltage
+    ).toFixed(3),
+    power: battery.battery.power.toFixed(2),
     time_to_empty:
-      battery.timeToEmpty !== 0
-        ? battery.timeToEmpty.toFixed(2)
+      battery.battery.timeToEmpty !== 0
+        ? battery.battery.timeToEmpty.toFixed(2)
         : "unavailable",
     time_to_full:
-      battery.timeToFull !== 0 ? battery.timeToFull.toFixed(2) : "unavailable",
-    voltage: battery.voltage.toFixed(1),
+      battery.battery.timeToFull !== 0
+        ? battery.battery.timeToFull.toFixed(2)
+        : "unavailable",
+    voltage: battery.battery.voltage.toFixed(1),
   };
 
   for (const [property, value] of Object.entries(dict)) {
-    const topic = `homeassistant/sensor/battery_${property}/state`;
+    const topic = `battery/battery/${battery.battery.serial}/${property}`;
     const payload = `${value}`;
 
     log.info(`publishing: ${topic}: ${payload}`);
     await mqttConn.publish(topic, payload);
   }
 };
-const publishBatteryModuleStates = async (
+const publishModuleStates = async (
   mqttConn: Mqtt.AsyncMqttClient,
-  batteryModule: BatteryModule
+  batteryModule: Module
 ) => {
   const dict = {
     amperage: batteryModule.amperage.toFixed(2),
@@ -299,7 +346,7 @@ const publishBatteryModuleStates = async (
   };
 
   for (const [property, value] of Object.entries(dict)) {
-    const topic = `homeassistant/sensor/batterymodule_${batteryModule.serial}_${property}/state`;
+    const topic = `battery/modules/${batteryModule.serial}/${property}`;
     const payload = `${value}`;
 
     log.info(`publishing: ${topic}: ${payload}`);
@@ -320,32 +367,35 @@ runForever({
     });
     log.info(`Connected to MODBUS`);
 
-    await publishBatteryConfigs(mqttConn);
-
+    let modules: Array<Module> = [];
     for (const server of servers) {
       log.info(`configuring HA for server ${server}`);
 
       const serverData = await queryServer(modbusConn, server);
 
-      const batteryModule = batteryModuleOf(serverData);
-      await publishBatteryModuleConfigs(mqttConn, batteryModule);
+      const module = moduleOf(serverData);
+      await publishModuleConfigs(mqttConn, module);
+
+      modules = [...modules, module];
     }
+
+    const battery = batteryOf(modules);
+    await publishBatteryConfigs(mqttConn, battery);
 
     return <const>{ modbusConn, mqttConn };
   },
 
   loop: async ({ modbusConn, mqttConn }) => {
-    let batteryModules: Array<BatteryModule> = [];
+    let modules: Array<Module> = [];
     for (const server of servers) {
       const serverData = await queryServer(modbusConn, server);
-      const batteryModule = batteryModuleOf(serverData);
+      const module = moduleOf(serverData);
 
-      await publishBatteryModuleStates(mqttConn, batteryModule);
-
-      batteryModules = [...batteryModules, batteryModule];
+      await publishModuleStates(mqttConn, module);
+      modules = [...modules, module];
     }
 
-    const battery = batteryOf(batteryModules);
+    const battery = batteryOf(modules);
     await publishBatteryStates(mqttConn, battery);
   },
 

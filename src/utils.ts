@@ -1,16 +1,11 @@
 import ModbusRTU from "modbus-serial";
 
-export const pMapSeries = async <In, Out>(
-  iterable: Array<In>,
-  mapper: (item: In) => Promise<Out>
-) => {
-  const result: Array<Out> = [];
-
-  for (const item of iterable) {
-    result.push(await mapper(item));
+export const uniqueStrings = (items: Array<string>) => {
+  const obj: Record<string, unknown> = {};
+  for (const item of items) {
+    obj[item] = true;
   }
-
-  return result;
+  return Object.keys(obj);
 };
 
 export const log = Object.assign(
