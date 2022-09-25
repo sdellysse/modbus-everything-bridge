@@ -164,6 +164,7 @@ const moduleOf = (data: ServerData) => {
     ...data,
     energy: 100.0 * (data.energyRemaining / data.energyCapacity),
     power: data.amperage * data.voltage,
+    serial: data.serial.replace(/[^A-Za-z0-9]/g, ""),
     timeToFull:
       data.amperage > 0
         ? (data.energyCapacity - data.energyRemaining) / data.amperage
@@ -213,18 +214,18 @@ const batteryOf = (modules: Array<Module>) => {
       energy: sums.energy / modules.length,
       manufacturerName: uniqueStrings(sums.manufacturerName)
         .sort((l, r) => l.localeCompare(r))
-        .join("."),
+        .join(","),
       model: uniqueStrings(sums.model)
         .sort((l, r) => l.localeCompare(r))
-        .join("."),
+        .join(","),
       power: sums.power / modules.length,
-      serial: Math.abs(
+      serial: `${modules.length.toString().padStart(2, "0")}x${Math.abs(
         CRC32.str(
           uniqueStrings(sums.serial)
             .sort((l, r) => l.localeCompare(r))
             .join(".")
         )
-      ),
+      )}`,
       timeToEmpty: sums.timeToEmpty / modules.length,
       timeToFull: sums.timeToFull / modules.length,
       voltage: sums.voltage / modules.length,
