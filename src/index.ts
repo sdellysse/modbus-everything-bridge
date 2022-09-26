@@ -3,79 +3,7 @@ import Mqtt from "async-mqtt";
 import CRC32 from "crc-32";
 import { log, queryModbus, runForever, uniqueStrings } from "./utils";
 
-const servers = <const>[48, 49, 50, 51];
-const homeAssistantConfigs = {
-  amperage: {
-    device_class: "current",
-    name: "Amperage",
-    state_class: "measurement",
-    unit_of_measurement: "A",
-  },
-  energy: {
-    device_class: "battery",
-    name: "Energy",
-    state_class: "measurement",
-    unit_of_measurement: "%",
-  },
-  energy_capacity: {
-    device_class: "energy",
-    name: "Energy Capacity",
-    state_class: "measurement",
-    unit_of_measurement: "Wh",
-  },
-  energy_remaining: {
-    device_class: "energy",
-    name: "Energy Remaining",
-    state_class: "measurement",
-    unit_of_measurement: "Wh",
-  },
-  "%MODULE%_cell_count": {
-    entity_category: "diagnostic",
-    name: "%MODULE% Cell Count",
-    state_class: "measurement",
-  },
-  "%MODULE%_%CELL%_temperature": {
-    device_class: "temperature",
-    entity_category: "diagnostic",
-    name: "%MODULE% %CELL% Temperature",
-    state_class: "measurement",
-    unit_of_measurement: "°C",
-  },
-  "%MODULE%_%CELL%_voltage": {
-    device_class: "voltage",
-    entity_category: "diagnostic",
-    name: "%MODULE% %CELL% Voltage",
-    state_class: "measurement",
-    unit_of_measurement: "V",
-  },
-  "%MODULE%_cycle_number": {
-    entity_category: "diagnostic",
-    name: "%MODULE% Cycle Number",
-    state_class: "measurement",
-  },
-  power: {
-    device_class: "power",
-    name: "Power",
-    state_class: "measurement",
-    unit_of_measurement: "W",
-  },
-  time_to_empty: {
-    device_class: "duration",
-    name: "Time To Empty",
-    unit_of_measurement: "h",
-  },
-  time_to_full: {
-    device_class: "duration",
-    name: "Time To Full",
-    unit_of_measurement: "h",
-  },
-  voltage: {
-    device_class: "voltage",
-    name: "Voltage",
-    state_class: "measurement",
-    unit_of_measurement: "V",
-  },
-};
+process.env.SERVERS = "[48, 49, 50, 51]";
 
 const queryServer = async (modbusConn: Modbus, server: number) => {
   log.info(`querying server ${server}`);
@@ -562,6 +490,7 @@ const publishModuleStates = async (
   }
 };
 
+const servers = JSON.parse(process.env.SERVERS);
 runForever({
   setup: async () => {
     log.info(`Connecting to MQTT`);
