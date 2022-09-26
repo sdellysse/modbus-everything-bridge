@@ -102,7 +102,11 @@ export const runForever = async <Setup>({
     try {
       setupBag = await setup();
     } catch (error) {
-      log.error(`Error in setup: ${JSON.stringify(error)}`);
+      log.error(
+        `Error in setup: ${
+          error instanceof Error ? error : JSON.stringify(error)
+        }`
+      );
       continue;
     }
 
@@ -111,7 +115,11 @@ export const runForever = async <Setup>({
         await loop(setupBag);
       }
     } catch (error) {
-      log.error(`Error in loop: ${JSON.stringify(error)}`);
+      log.error(
+        `Error in loop: ${
+          error instanceof Error ? error : JSON.stringify(error)
+        }`
+      );
       await teardown(setupBag);
     }
   }
