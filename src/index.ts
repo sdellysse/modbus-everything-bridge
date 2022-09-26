@@ -469,8 +469,10 @@ const publishModuleStates = async (
   stateMap[`model`] = module.model;
   stateMap[`power`] = module.power.toFixed(3);
   stateMap[`serial`] = module.serial;
-  stateMap[`time_to_empty`] = module.timeToEmpty?.toFixed(2) ?? "unavailable";
-  stateMap[`time_to_full`] = module.timeToFull?.toFixed(2) ?? "unavailable";
+  stateMap[`time_to_empty`] =
+    module.timeToEmpty !== 0 ? module.timeToEmpty.toFixed(2) : "unavailable";
+  stateMap[`time_to_full`] =
+    module.timeToFull !== 0 ? module.timeToFull.toFixed(2) : "unavailable";
   stateMap[`voltage`] = module.voltage.toFixed(1);
 
   for (let ci = 0; ci < module.cellCount; ci++) {
