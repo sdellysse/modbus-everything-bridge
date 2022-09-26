@@ -4,14 +4,33 @@ import CRC32 from "crc-32";
 import { log, queryModbus, runForever, uniqueStrings } from "./utils";
 
 const servers = <const>[48, 49, 50, 51];
-const homeAssistantConfigs = <const>{
+const homeAssistantConfigs = {
   amperage: {
     device_class: "current",
     name: "Amperage",
     state_class: "measurement",
     unit_of_measurement: "A",
   },
-  cycleNumber: {
+  cell_count: {
+    entity_category: "diagnostic",
+    name: "Cell Count",
+    state_class: "measurement",
+  },
+  "cell_%%_temperature": {
+    device_class: "temperature",
+    entity_category: "diagnostic",
+    name: "Cell %% Temperature",
+    state_class: "measurement",
+    unit_of_measurement: "°C",
+  },
+  "cell_%%_voltage": {
+    device_class: "voltage",
+    entity_category: "diagnostic",
+    name: "Cell %% Voltage",
+    state_class: "measurement",
+    unit_of_measurement: "V",
+  },
+  cycle_number: {
     entity_category: "diagnostic",
     name: "Cycle Number",
     state_class: "measurement",
@@ -57,6 +76,50 @@ const homeAssistantConfigs = <const>{
     unit_of_measurement: "V",
   },
 };
+const configsForCellCount = (cellCount: number) => {
+  let configs: Record<
+    string,
+    typeof homeAssistantConfigs[keyof typeof homeAssistantConfigs]
+  > = {};
+
+  for (const [property, props] of Object.entries(homeAssistantConfigs)) {
+    if (property.includes("%%")) {
+      for (let i = 0; i < cellCount; i++) {
+        const cellNumberString = (i + 1).toString().padStart(2, "0");
+        const numberedProperty = property.split("%%").join(cellNumberString);
+        const numberedName = props.name.split("%%").join(cellNumberString);
+
+        configs[numberedProperty] = {
+          ...props,
+          name: numberedName,
+        };
+      }
+    } else {
+      configs[property] = props;
+    }
+  }
+
+  return configs;
+};
+const statesForDict = (dict: Record<string, unknown>) => {
+  let states: Record<string, unknown> = {};
+
+  for (const [property, value] of Object.entries(dict)) {
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        const numberedProperty = property
+          .split("%%")
+          .join((i + 1).toString().padStart(2, "0"));
+
+        states[numberedProperty] = value[i];
+      }
+    } else {
+      states[property] = value;
+    }
+  }
+
+  return states;
+};
 
 const queryServer = async (modbusConn: Modbus, server: number) => {
   log.info(`querying server ${server}`);
@@ -87,22 +150,22 @@ const queryServer = async (modbusConn: Modbus, server: number) => {
           cell15Voltage: 0.1 * numberAt(5015, 1, "unsigned"),
           cell16Voltage: 0.1 * numberAt(5016, 1, "unsigned"),
           cellTempCount: 1.0 * numberAt(5017, 1, "unsigned"),
-          cell01Temp: 0.1 * numberAt(5018, 1, "signed"),
-          cell02Temp: 0.1 * numberAt(5019, 1, "signed"),
-          cell03Temp: 0.1 * numberAt(5020, 1, "signed"),
-          cell04Temp: 0.1 * numberAt(5021, 1, "signed"),
-          cell05Temp: 0.1 * numberAt(5022, 1, "signed"),
-          cell06Temp: 0.1 * numberAt(5023, 1, "signed"),
-          cell07Temp: 0.1 * numberAt(5024, 1, "signed"),
-          cell08Temp: 0.1 * numberAt(5025, 1, "signed"),
-          cell09Temp: 0.1 * numberAt(5026, 1, "signed"),
-          cell10Temp: 0.1 * numberAt(5027, 1, "signed"),
-          cell11Temp: 0.1 * numberAt(5028, 1, "signed"),
-          cell12Temp: 0.1 * numberAt(5029, 1, "signed"),
-          cell13Temp: 0.1 * numberAt(5030, 1, "signed"),
-          cell14Temp: 0.1 * numberAt(5031, 1, "signed"),
-          cell15Temp: 0.1 * numberAt(5032, 1, "signed"),
-          cell16Temp: 0.1 * numberAt(5033, 1, "signed"),
+          cell01Temperature: 0.1 * numberAt(5018, 1, "signed"),
+          cell02Temperature: 0.1 * numberAt(5019, 1, "signed"),
+          cell03Temperature: 0.1 * numberAt(5020, 1, "signed"),
+          cell04Temperature: 0.1 * numberAt(5021, 1, "signed"),
+          cell05Temperature: 0.1 * numberAt(5022, 1, "signed"),
+          cell06Temperature: 0.1 * numberAt(5023, 1, "signed"),
+          cell07Temperature: 0.1 * numberAt(5024, 1, "signed"),
+          cell08Temperature: 0.1 * numberAt(5025, 1, "signed"),
+          cell09Temperature: 0.1 * numberAt(5026, 1, "signed"),
+          cell10Temperature: 0.1 * numberAt(5027, 1, "signed"),
+          cell11Temperature: 0.1 * numberAt(5028, 1, "signed"),
+          cell12Temperature: 0.1 * numberAt(5029, 1, "signed"),
+          cell13Temperature: 0.1 * numberAt(5030, 1, "signed"),
+          cell14Temperature: 0.1 * numberAt(5031, 1, "signed"),
+          cell15Temperature: 0.1 * numberAt(5032, 1, "signed"),
+          cell16Temperature: 0.1 * numberAt(5033, 1, "signed"),
         }
     )),
 
@@ -160,8 +223,25 @@ const queryServer = async (modbusConn: Modbus, server: number) => {
 type ServerData = Awaited<ReturnType<typeof queryServer>>;
 
 const moduleOf = (data: ServerData) => {
+  let cellTemperatures: Array<number> = [];
+  let cellVoltages: Array<number> = [];
+  for (let i = 0; i < data.cellVoltageCount; i++) {
+    const cellTemperatureKey: keyof ServerData = <any>(
+      `cell${(i + 1).toString().padStart(2, "0")}Temperature`
+    );
+    const cellVoltageKey: keyof ServerData = <any>(
+      `cell${(i + 1).toString().padStart(2, "0")}Voltage`
+    );
+
+    cellTemperatures = [...cellTemperatures, <number>data[cellTemperatureKey]];
+    cellVoltages = [...cellVoltages, <number>data[cellVoltageKey]];
+  }
+
   return {
     ...data,
+    cellCount: data.cellVoltageCount,
+    cellTemperatures,
+    cellVoltages,
     energy: 100.0 * (data.energyRemaining / data.energyCapacity),
     power: data.amperage * data.voltage,
     serial: data.serial.replace(/[^A-Za-z0-9]/g, ""),
@@ -176,8 +256,15 @@ const moduleOf = (data: ServerData) => {
 type Module = Awaited<ReturnType<typeof moduleOf>>;
 
 const batteryOf = (modules: Array<Module>) => {
+  const sortedModules = [...modules].sort((l, r) =>
+    l.serial.localeCompare(r.serial)
+  );
+
   let sums = {
     amperage: 0,
+    cellCount: 0,
+    cellTemperatures: <Array<number>>[],
+    cellVoltages: <Array<number>>[],
     cycleNumber: 0,
     energy: 0,
     energyCapacity: 0,
@@ -190,9 +277,12 @@ const batteryOf = (modules: Array<Module>) => {
     timeToFull: 0,
     voltage: 0,
   };
-  for (const module of modules) {
+  for (const module of sortedModules) {
     sums = {
       amperage: sums.amperage + module.amperage,
+      cellCount: sums.cellCount + module.cellCount,
+      cellTemperatures: [...sums.cellTemperatures, ...module.cellTemperatures],
+      cellVoltages: [...sums.cellVoltages, ...module.cellVoltages],
       cycleNumber: sums.cycleNumber + module.cycleNumber,
       energy: sums.energy + module.energy,
       energyCapacity: sums.energyCapacity + module.energyCapacity,
@@ -212,19 +302,11 @@ const batteryOf = (modules: Array<Module>) => {
       ...sums,
       cycleNumber: sums.cycleNumber / modules.length,
       energy: sums.energy / modules.length,
-      manufacturerName: uniqueStrings(sums.manufacturerName)
-        .sort((l, r) => l.localeCompare(r))
-        .join(","),
-      model: uniqueStrings(sums.model)
-        .sort((l, r) => l.localeCompare(r))
-        .join(","),
+      manufacturerName: uniqueStrings(sums.manufacturerName).join(","),
+      model: uniqueStrings(sums.model).join(","),
       power: sums.power / modules.length,
       serial: `${modules.length.toString().padStart(2, "0")}x${Math.abs(
-        CRC32.str(
-          uniqueStrings(sums.serial)
-            .sort((l, r) => l.localeCompare(r))
-            .join(".")
-        )
+        CRC32.str(uniqueStrings(sums.serial).join("."))
       )}`,
       timeToEmpty: sums.timeToEmpty / modules.length,
       timeToFull: sums.timeToFull / modules.length,
@@ -239,7 +321,9 @@ const publishBatteryConfigs = async (
   mqttConn: Mqtt.AsyncMqttClient,
   battery: Battery
 ) => {
-  for (const [property, props] of Object.entries(homeAssistantConfigs)) {
+  for (const [property, props] of Object.entries(
+    configsForCellCount(battery.battery.cellCount)
+  )) {
     const topic = `homeassistant/sensor/battery_${battery.battery.serial}_${property}/config`;
     const payload = JSON.stringify(
       {
@@ -267,7 +351,9 @@ const publishModuleConfigs = async (
   mqttConn: Mqtt.AsyncMqttClient,
   module: Module
 ) => {
-  for (const [property, props] of Object.entries(homeAssistantConfigs)) {
+  for (const [property, props] of Object.entries(
+    configsForCellCount(module.cellCount)
+  )) {
     const topic = `homeassistant/sensor/batterymodule_${module.serial}_${property}/config`;
     const payload = JSON.stringify(
       {
@@ -298,7 +384,14 @@ const publishBatteryStates = async (
 ) => {
   const dict = {
     amperage: battery.battery.amperage.toFixed(2),
-    cycleNumber: battery.battery.cycleNumber.toFixed(2),
+    cell_count: battery.battery.cellCount,
+    "cell_%%_temperature": battery.battery.cellTemperatures.map(
+      (cellTemperature) => cellTemperature.toFixed(1)
+    ),
+    "cell_%%_voltage": battery.battery.cellVoltages.map((cellVoltage) =>
+      cellVoltage.toFixed(1)
+    ),
+    cycle_number: battery.battery.cycleNumber.toFixed(2),
     energy: battery.battery.energy.toFixed(2),
     energy_capacity: (
       battery.battery.energyCapacity * battery.battery.voltage
@@ -318,7 +411,7 @@ const publishBatteryStates = async (
     voltage: battery.battery.voltage.toFixed(1),
   };
 
-  for (const [property, value] of Object.entries(dict)) {
+  for (const [property, value] of Object.entries(statesForDict(dict))) {
     const topic = `battery/battery/${battery.battery.serial}/${property}`;
     const payload = `${value}`;
 
@@ -328,26 +421,29 @@ const publishBatteryStates = async (
 };
 const publishModuleStates = async (
   mqttConn: Mqtt.AsyncMqttClient,
-  batteryModule: Module
+  module: Module
 ) => {
   const dict = {
-    amperage: batteryModule.amperage.toFixed(2),
-    cycleNumber: batteryModule.cycleNumber,
-    energy: batteryModule.energy.toFixed(2),
-    energy_capacity: (
-      batteryModule.energyCapacity * batteryModule.voltage
-    ).toFixed(2),
-    energy_remaining: (
-      batteryModule.energyRemaining * batteryModule.voltage
-    ).toFixed(2),
-    power: batteryModule.power.toFixed(3),
-    time_to_empty: batteryModule.timeToEmpty?.toFixed(2) ?? "unavailable",
-    time_to_full: batteryModule.timeToFull?.toFixed(2) ?? "unavailable",
-    voltage: batteryModule.voltage.toFixed(1),
+    amperage: module.amperage.toFixed(2),
+    cell_count: module.cellCount,
+    "cell_%%_temperature": module.cellTemperatures.map((cellTemperature) =>
+      cellTemperature.toFixed(1)
+    ),
+    "cell_%%_voltage": module.cellVoltages.map((cellVoltage) =>
+      cellVoltage.toFixed(1)
+    ),
+    cycle_number: module.cycleNumber,
+    energy: module.energy.toFixed(2),
+    energy_capacity: (module.energyCapacity * module.voltage).toFixed(2),
+    energy_remaining: (module.energyRemaining * module.voltage).toFixed(2),
+    power: module.power.toFixed(3),
+    time_to_empty: module.timeToEmpty?.toFixed(2) ?? "unavailable",
+    time_to_full: module.timeToFull?.toFixed(2) ?? "unavailable",
+    voltage: module.voltage.toFixed(1),
   };
 
-  for (const [property, value] of Object.entries(dict)) {
-    const topic = `battery/modules/${batteryModule.serial}/${property}`;
+  for (const [property, value] of Object.entries(statesForDict(dict))) {
+    const topic = `battery/modules/${module.serial}/${property}`;
     const payload = `${value}`;
 
     log.info(`publishing: ${topic}: ${payload}`);
