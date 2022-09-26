@@ -15,7 +15,7 @@ process.env.SERVER_4_MODBUS_ADDRESS = "51";
 process.env.HOME_ASSISTANT_DISCOVERY_ENABLE = "true";
 process.env.HOME_ASSISTANT_DISCOVERY_PREFIX = "homeassistant";
 
-const queryServer = async (modbusConn: Modbus, server: number) => {
+const queryModbusServer = async (modbusConn: Modbus, server: number) => {
   log.info(`querying server ${server}`);
 
   return <const>{
@@ -122,7 +122,7 @@ const queryServer = async (modbusConn: Modbus, server: number) => {
     )),
   };
 };
-type ServerData = Awaited<ReturnType<typeof queryServer>>;
+type ServerData = Awaited<ReturnType<typeof queryModbusServer>>;
 
 const moduleOf = (data: ServerData) => {
   const amps = data.amperage;
@@ -132,21 +132,25 @@ const moduleOf = (data: ServerData) => {
   const chargeRemaining = data.chargeRemaining * volts;
 
   return {
-    ...data,
     amps,
-    amps_in: amps > 0 ? amps : 0,
-    amps_out: amps < 0 ? Math.abs(amps) : 0,
+    ampsIn: amps > 0 ? amps : 0,
+    ampsOut: amps < 0 ? Math.abs(amps) : 0,
     cellCount: data.cellVoltageCount,
+    cellTemperatures: data.cellTemperatures,
+    cellVoltages: data.cellVoltages,
     chargeCapacity,
     chargePercentage: 100.0 * (chargeRemaining / chargeCapacity),
     chargeRemaining,
+    cycleNumber: data.cycleNumber,
+    manufacturerName: data.manufacturerName,
+    model: data.model,
     serial: data.serial.replace(/[^A-Za-z0-9]/g, ""),
     timeToFull: watts > 0 ? (chargeCapacity - chargeRemaining) / watts : 0,
     timeToEmpty: watts < 0 ? Math.abs(chargeRemaining / watts) : 0,
     volts,
     watts,
-    watts_in: watts > 0 ? watts : 0,
-    watts_out: watts < 0 ? Math.abs(watts) : 0,
+    wattsIn: watts > 0 ? watts : 0,
+    wattsOut: watts < 0 ? Math.abs(watts) : 0,
   };
 };
 type Module = Awaited<ReturnType<typeof moduleOf>>;
@@ -158,8 +162,8 @@ const batteryOf = (modules: Array<Module>) => {
 
   let sums = {
     amps: 0,
-    amps_in: 0,
-    amps_out: 0,
+    ampsIn: 0,
+    ampsOut: 0,
     chargeCapacity: 0,
     chargePercentage: 0,
     chargeRemaining: 0,
@@ -169,14 +173,14 @@ const batteryOf = (modules: Array<Module>) => {
     timeToFull: 0,
     volts: 0,
     watts: 0,
-    watts_in: 0,
-    watts_out: 0,
+    wattsIn: 0,
+    wattsOut: 0,
   };
   for (const module of sortedModules) {
     sums = {
       amps: sums.amps + module.amps,
-      amps_in: sums.amps_in + module.amps_in,
-      amps_out: sums.amps_out + module.amps_out,
+      ampsIn: sums.ampsIn + module.ampsIn,
+      ampsOut: sums.ampsOut + module.ampsOut,
       chargePercentage: sums.chargePercentage + module.chargePercentage,
       chargeCapacity: sums.chargeCapacity + module.chargeCapacity,
       chargeRemaining: sums.chargeRemaining + module.chargeRemaining,
@@ -186,8 +190,8 @@ const batteryOf = (modules: Array<Module>) => {
       timeToFull: sums.timeToFull + module.timeToFull,
       volts: sums.volts + module.volts,
       watts: sums.watts + module.watts,
-      watts_in: sums.watts_in + module.watts_in,
-      watts_out: sums.watts_out + module.watts_out,
+      wattsIn: sums.wattsIn + module.wattsIn,
+      wattsOut: sums.wattsOut + module.wattsOut,
     };
   }
 
@@ -208,440 +212,519 @@ const batteryOf = (modules: Array<Module>) => {
 };
 type Battery = Awaited<ReturnType<typeof batteryOf>>;
 
-const publishBatteryConfigs = async (
-  mqttConn: Mqtt.AsyncMqttClient,
-  battery: Battery
-) => {
-  const configs: Record<string, { name: string } & Record<string, unknown>> =
-    {};
-  configs[`amps`] = {
-    device_class: "current",
-    name: "Amps",
-    state_class: "measurement",
-    unit_of_measurement: "A",
-  };
-  configs[`amps_in`] = {
-    device_class: "current",
-    name: "Amps In",
-    state_class: "measurement",
-    unit_of_measurement: "A",
-  };
-  configs[`amps_out`] = {
-    device_class: "current",
-    name: "Amps Out",
-    state_class: "measurement",
-    unit_of_measurement: "A",
-  };
-  configs[`charge_capacity`] = {
-    device_class: "energy",
-    name: "Charge Capacity",
-    state_class: "measurement",
-    unit_of_measurement: "Wh",
-  };
-  configs[`charge_percentage`] = {
-    device_class: "battery",
-    name: "Charge Percentage",
-    state_class: "measurement",
-    unit_of_measurement: "%",
-  };
-  configs[`charge_remaining`] = {
-    device_class: "energy",
-    name: "Charge Remaining",
-    state_class: "measurement",
-    unit_of_measurement: "Wh",
-  };
-  configs[`time_to_empty`] = {
-    device_class: "duration",
-    name: "Time To Empty",
-    unit_of_measurement: "h",
-  };
-  configs[`time_to_full`] = {
-    device_class: "duration",
-    name: "Time To Full",
-    unit_of_measurement: "h",
-  };
-  configs[`volts`] = {
-    device_class: "voltage",
-    name: "Volts",
-    state_class: "measurement",
-    unit_of_measurement: "V",
-  };
-  configs[`watts`] = {
-    device_class: "current",
-    name: "Watts",
-    state_class: "measurement",
-    unit_of_measurement: "W",
-  };
-  configs[`watts_in`] = {
-    device_class: "current",
-    name: "Watts In",
-    state_class: "measurement",
-    unit_of_measurement: "W",
-  };
-  configs[`watts_out`] = {
-    device_class: "current",
-    name: "Watts Out",
-    state_class: "measurement",
-    unit_of_measurement: "W",
-  };
-
-  for (const [property, props] of Object.entries(configs)) {
-    const topic = `${process.env
-      .HOME_ASSISTANT_DISCOVERY_PREFIX!}/sensor/battery_${
-      battery.serial
-    }_${property}/config`;
-    const payload = JSON.stringify(
-      {
-        ...props,
-        device: {
-          identifiers: [battery.serial],
-          model: battery.model,
-          name: `Battery ${battery.serial}`,
-        },
-        name: `Battery ${battery.serial} ${props.name}`,
-        object_id: `battery_${battery.serial}_${property}`,
-        state_topic: `${process.env.MQTT_PREFIX!}/battery/${
-          battery.serial
-        }/${property}`,
-        unique_id: `battery_${battery.serial}_${property}`,
-      },
-      undefined,
-      4
-    );
-
-    log.info(`publishing retained: ${topic}: '${payload}'`);
-    await mqttConn.publish(topic, payload, { retain: true });
-  }
+type HomeAssistantConfigMapping = {
+  unique_id: string;
+  state_topic: string;
+  name: string;
+  config: Record<string, unknown>;
 };
-const publishModuleConfigs = async (
-  mqttConn: Mqtt.AsyncMqttClient,
-  module: Module
-) => {
-  type Mapping = {
-    unique_id: string;
-    state_topic: string;
-    name: string;
-    config: Record<string, unknown>;
-  };
-  let mappings: Array<Mapping> = [];
-
-  mappings = [
-    ...mappings,
-    {
-      state_topic: "amps",
-      unique_id: "amps",
-      name: "Amps",
-      config: {
-        device_class: "current",
-        state_class: "measurement",
-        unit_of_measurement: "A",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: "amps_in",
-      state_topic: "amps_in",
-      name: "Amps In",
-      config: {
-        device_class: "current",
-        state_class: "measurement",
-        unit_of_measurement: "A",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `amps_out`,
-      state_topic: "amps_out",
-      name: "Amps Out",
-      config: {
-        device_class: "current",
-        state_class: "measurement",
-        unit_of_measurement: "A",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `cell_count`,
-      state_topic: "cell_count",
-      name: `Cell Count`,
-      config: {
-        entity_category: "diagnostic",
-        state_class: "measurement",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `charge_capacity`,
-      state_topic: "charge_capacity",
-      name: "Charge Capacity",
-      config: {
-        device_class: "energy",
-        state_class: "measurement",
-        unit_of_measurement: "Wh",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `charge_percentage`,
-      state_topic: "charge_percentage",
-      name: "Charge Percentage",
-      config: {
-        device_class: "battery",
-        state_class: "measurement",
-        unit_of_measurement: "%",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `charge_remaining`,
-      state_topic: "charge_remaining",
-      name: "Charge Remaining",
-      config: {
-        device_class: "energy",
-        state_class: "measurement",
-        unit_of_measurement: "Wh",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `cycle_number`,
-      state_topic: `cycle_number`,
-      name: `Cycle Number`,
-      config: {
-        entity_category: "diagnostic",
-        state_class: "measurement",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `time_to_empty`,
-      state_topic: `time_to_empty`,
-      name: "Time To Empty",
-      config: {
-        device_class: "duration",
-        unit_of_measurement: "h",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `time_to_full`,
-      state_topic: `time_to_full`,
-      name: "Time To Full",
-      config: {
-        device_class: "duration",
-        unit_of_measurement: "h",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `volts`,
-      state_topic: `volts`,
-      name: "Volts",
-      config: {
-        device_class: "voltage",
-        state_class: "measurement",
-        unit_of_measurement: "V",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: "watts",
-      state_topic: `watts`,
-      name: "Watts",
-      config: {
-        device_class: "current",
-        state_class: "measurement",
-        unit_of_measurement: "W",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `watts_in`,
-      state_topic: `watts_in`,
-      name: "Watts In",
-      config: {
-        device_class: "current",
-        state_class: "measurement",
-        unit_of_measurement: "W",
-      },
-    },
-  ];
-  mappings = [
-    ...mappings,
-    {
-      unique_id: `watts_out`,
-      state_topic: `watts_out`,
-      name: "Watts Out",
-      config: {
-        device_class: "current",
-        state_class: "measurement",
-        unit_of_measurement: "W",
-      },
-    },
-  ];
-
-  for (let ci = 0; ci < module.cellCount; ci++) {
-    const cellNumberString = (ci + 1).toString().padStart(2, "0");
-
+const homeAssistantConfigFns = {
+  publishBattery: async (mqttConn: Mqtt.AsyncMqttClient, battery: Battery) => {
+    let mappings: Array<HomeAssistantConfigMapping> = [];
     mappings = [
       ...mappings,
       {
-        unique_id: `cell_${cellNumberString}_temperature`,
-        state_topic: `cells/${cellNumberString}/temperature`,
-        name: `Cell ${cellNumberString} Temperature`,
+        state_topic: "amps",
+        unique_id: "amps",
+        name: "Amps",
         config: {
-          device_class: "temperature",
-          entity_category: "diagnostic",
+          device_class: "current",
           state_class: "measurement",
-          unit_of_measurement: "°C",
+          unit_of_measurement: "A",
         },
       },
     ];
     mappings = [
       ...mappings,
       {
-        unique_id: `cell_${cellNumberString}_volts`,
-        state_topic: `cells/${cellNumberString}/volts`,
-        name: `Cell ${cellNumberString} Volts`,
+        unique_id: "amps_in",
+        state_topic: "amps_in",
+        name: "Amps In",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "A",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `amps_out`,
+        state_topic: "amps_out",
+        name: "Amps Out",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "A",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `charge_capacity`,
+        state_topic: "charge_capacity",
+        name: "Charge Capacity",
+        config: {
+          device_class: "energy",
+          state_class: "measurement",
+          unit_of_measurement: "Wh",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `charge_percentage`,
+        state_topic: "charge_percentage",
+        name: "Charge Percentage",
+        config: {
+          device_class: "battery",
+          state_class: "measurement",
+          unit_of_measurement: "%",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `charge_remaining`,
+        state_topic: "charge_remaining",
+        name: "Charge Remaining",
+        config: {
+          device_class: "energy",
+          state_class: "measurement",
+          unit_of_measurement: "Wh",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `time_to_empty`,
+        state_topic: `time_to_empty`,
+        name: "Time To Empty",
+        config: {
+          device_class: "duration",
+          unit_of_measurement: "h",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `time_to_full`,
+        state_topic: `time_to_full`,
+        name: "Time To Full",
+        config: {
+          device_class: "duration",
+          unit_of_measurement: "h",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `volts`,
+        state_topic: `volts`,
+        name: "Volts",
         config: {
           device_class: "voltage",
-          entity_category: "diagnostic",
           state_class: "measurement",
           unit_of_measurement: "V",
         },
       },
     ];
-  }
-  for (const mapping of mappings) {
-    const haPrefix = process.env.HOME_ASSISTANT_DISCOVERY_PREFIX!;
-    const topic = `${haPrefix}/sensor/batterymodule_${module.serial}_${mapping.unique_id}/config`;
-
-    const mqttPrefix = process.env.MQTT_PREFIX!;
-    const payload = JSON.stringify(
+    mappings = [
+      ...mappings,
       {
-        ...mapping,
-        device: {
-          identifiers: [module.serial],
-          manufacturer: module.manufacturerName,
-          model: module.model,
-          name: `Battery Module ${module.serial}`,
+        unique_id: "watts",
+        state_topic: `watts`,
+        name: "Watts",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "W",
         },
-        name: `Battery Module ${module.serial} ${mapping.name}`,
-        object_id: `batterymodule_${module.serial}_${mapping.unique_id}`,
-        state_topic: `${mqttPrefix}/modules/${module.serial}/${mapping.state_topic}`,
-        unique_id: `batterymodule_${module.serial}_${mapping.unique_id}`,
       },
-      undefined,
-      4
-    );
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `watts_in`,
+        state_topic: `watts_in`,
+        name: "Watts In",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "W",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `watts_out`,
+        state_topic: `watts_out`,
+        name: "Watts Out",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "W",
+        },
+      },
+    ];
 
-    log.info(`publishing retained: ${topic}: ${payload}`);
-    await mqttConn.publish(topic, payload, { retain: true });
-  }
+    for (const mapping of mappings) {
+      const haPrefix = process.env.HOME_ASSISTANT_DISCOVERY_PREFIX!;
+      const topic = `${haPrefix}/sensor/battery_${battery.serial}_${mapping.unique_id}/config`;
+
+      const mqttPrefix = process.env.MQTT_PREFIX!;
+      const payload = JSON.stringify(
+        {
+          ...mapping.config,
+          device: {
+            identifiers: [battery.serial],
+            model: battery.model,
+            name: `Battery ${battery.serial}`,
+          },
+          name: `Battery ${battery.serial} ${mapping.name}`,
+          object_id: `battery_${battery.serial}_${mapping.unique_id}`,
+          state_topic: `${mqttPrefix}/battery/${battery.serial}/${mapping.state_topic}`,
+          unique_id: `battery_${battery.serial}_${mapping.unique_id}`,
+        },
+        undefined,
+        4
+      );
+
+      log.info(`publishing retained: ${topic}: '${payload}'`);
+      await mqttConn.publish(topic, payload, { retain: true });
+    }
+  },
+
+  publishModule: async (mqttConn: Mqtt.AsyncMqttClient, module: Module) => {
+    let mappings: Array<HomeAssistantConfigMapping> = [];
+
+    mappings = [
+      ...mappings,
+      {
+        state_topic: "amps",
+        unique_id: "amps",
+        name: "Amps",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "A",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: "amps_in",
+        state_topic: "amps_in",
+        name: "Amps In",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "A",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `amps_out`,
+        state_topic: "amps_out",
+        name: "Amps Out",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "A",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_count`,
+        state_topic: "cell_count",
+        name: `Cell Count`,
+        config: {
+          entity_category: "diagnostic",
+          state_class: "measurement",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `charge_capacity`,
+        state_topic: "charge_capacity",
+        name: "Charge Capacity",
+        config: {
+          device_class: "energy",
+          state_class: "measurement",
+          unit_of_measurement: "Wh",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `charge_percentage`,
+        state_topic: "charge_percentage",
+        name: "Charge Percentage",
+        config: {
+          device_class: "battery",
+          state_class: "measurement",
+          unit_of_measurement: "%",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `charge_remaining`,
+        state_topic: "charge_remaining",
+        name: "Charge Remaining",
+        config: {
+          device_class: "energy",
+          state_class: "measurement",
+          unit_of_measurement: "Wh",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cycle_number`,
+        state_topic: `cycle_number`,
+        name: `Cycle Number`,
+        config: {
+          entity_category: "diagnostic",
+          state_class: "measurement",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `time_to_empty`,
+        state_topic: `time_to_empty`,
+        name: "Time To Empty",
+        config: {
+          device_class: "duration",
+          unit_of_measurement: "h",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `time_to_full`,
+        state_topic: `time_to_full`,
+        name: "Time To Full",
+        config: {
+          device_class: "duration",
+          unit_of_measurement: "h",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `volts`,
+        state_topic: `volts`,
+        name: "Volts",
+        config: {
+          device_class: "voltage",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: "watts",
+        state_topic: `watts`,
+        name: "Watts",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "W",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `watts_in`,
+        state_topic: `watts_in`,
+        name: "Watts In",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "W",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `watts_out`,
+        state_topic: `watts_out`,
+        name: "Watts Out",
+        config: {
+          device_class: "current",
+          state_class: "measurement",
+          unit_of_measurement: "W",
+        },
+      },
+    ];
+
+    for (let ci = 0; ci < module.cellCount; ci++) {
+      const cellNumberString = (ci + 1).toString().padStart(2, "0");
+
+      mappings = [
+        ...mappings,
+        {
+          unique_id: `cell_${cellNumberString}_temperature`,
+          state_topic: `cells/${cellNumberString}/temperature`,
+          name: `Cell ${cellNumberString} Temperature`,
+          config: {
+            device_class: "temperature",
+            entity_category: "diagnostic",
+            state_class: "measurement",
+            unit_of_measurement: "°C",
+          },
+        },
+      ];
+      mappings = [
+        ...mappings,
+        {
+          unique_id: `cell_${cellNumberString}_volts`,
+          state_topic: `cells/${cellNumberString}/volts`,
+          name: `Cell ${cellNumberString} Volts`,
+          config: {
+            device_class: "voltage",
+            entity_category: "diagnostic",
+            state_class: "measurement",
+            unit_of_measurement: "V",
+          },
+        },
+      ];
+    }
+    for (const mapping of mappings) {
+      const haPrefix = process.env.HOME_ASSISTANT_DISCOVERY_PREFIX!;
+      const topic = `${haPrefix}/sensor/batterymodule_${module.serial}_${mapping.unique_id}/config`;
+
+      const mqttPrefix = process.env.MQTT_PREFIX!;
+      const payload = JSON.stringify(
+        {
+          ...mapping,
+          device: {
+            identifiers: [module.serial],
+            manufacturer: module.manufacturerName,
+            model: module.model,
+            name: `Battery Module ${module.serial}`,
+          },
+          name: `Battery Module ${module.serial} ${mapping.name}`,
+          object_id: `batterymodule_${module.serial}_${mapping.unique_id}`,
+          state_topic: `${mqttPrefix}/modules/${module.serial}/${mapping.state_topic}`,
+          unique_id: `batterymodule_${module.serial}_${mapping.unique_id}`,
+        },
+        undefined,
+        4
+      );
+
+      log.info(`publishing retained: ${topic}: ${payload}`);
+      await mqttConn.publish(topic, payload, { retain: true });
+    }
+  },
 };
 
-const publishBatteryStates = async (
-  mqttConn: Mqtt.AsyncMqttClient,
-  battery: Battery
-) => {
-  const stateMap: Record<string, unknown> = {};
+const stateFns = {
+  publishBattery: async (mqttConn: Mqtt.AsyncMqttClient, battery: Battery) => {
+    const stateMap: Record<string, unknown> = {};
 
-  stateMap[`amps`] = battery.amps.toFixed(2);
-  stateMap[`amps_in`] = battery.amps_in.toFixed(2);
-  stateMap[`amps_out`] = battery.amps_out.toFixed(2);
-  stateMap[`charge_capacity`] = battery.chargeCapacity.toFixed(3);
-  stateMap[`charge_percentage`] = battery.chargePercentage.toFixed(2);
-  stateMap[`charge_remaining`] = battery.chargeRemaining.toFixed(3);
-  stateMap[`model`] = battery.model;
-  stateMap[`serial`] = battery.serial;
-  stateMap[`time_to_empty`] =
-    battery.timeToEmpty !== 0 ? battery.timeToEmpty.toFixed(2) : "unavailable";
-  stateMap[`time_to_full`] =
-    battery.timeToFull !== 0 ? battery.timeToFull.toFixed(2) : "unavailable";
-  stateMap[`volts`] = battery.volts.toFixed(1);
-  stateMap[`watts`] = battery.watts.toFixed(2);
-  stateMap[`watts_in`] = battery.watts_in.toFixed(2);
-  stateMap[`watts_out`] = battery.watts_out.toFixed(2);
+    stateMap[`amps`] = battery.amps.toFixed(2);
+    stateMap[`amps_in`] = battery.ampsIn.toFixed(2);
+    stateMap[`amps_out`] = battery.ampsOut.toFixed(2);
+    stateMap[`charge_capacity`] = battery.chargeCapacity.toFixed(3);
+    stateMap[`charge_percentage`] = battery.chargePercentage.toFixed(2);
+    stateMap[`charge_remaining`] = battery.chargeRemaining.toFixed(3);
+    stateMap[`model`] = battery.model;
+    stateMap[`serial`] = battery.serial;
+    stateMap[`time_to_empty`] =
+      battery.timeToEmpty !== 0
+        ? battery.timeToEmpty.toFixed(2)
+        : "unavailable";
+    stateMap[`time_to_full`] =
+      battery.timeToFull !== 0 ? battery.timeToFull.toFixed(2) : "unavailable";
+    stateMap[`volts`] = battery.volts.toFixed(1);
+    stateMap[`watts`] = battery.watts.toFixed(2);
+    stateMap[`watts_in`] = battery.wattsIn.toFixed(2);
+    stateMap[`watts_out`] = battery.wattsOut.toFixed(2);
 
-  for (const [key, value] of Object.entries(stateMap)) {
-    const topic = `${process.env.MQTT_PREFIX!}/battery/${
-      battery.serial
-    }/${key}`;
-    const payload = `${value}`;
+    for (const [key, value] of Object.entries(stateMap)) {
+      const topic = `${process.env.MQTT_PREFIX!}/battery/${
+        battery.serial
+      }/${key}`;
+      const payload = `${value}`;
 
-    log.info(`publishing: ${topic}: ${payload}`);
-    await mqttConn.publish(topic, payload);
-  }
+      log.info(`publishing: ${topic}: ${payload}`);
+      await mqttConn.publish(topic, payload);
+    }
+  },
+  publishModule: async (mqttConn: Mqtt.AsyncMqttClient, module: Module) => {
+    const stateMap: Record<string, unknown> = {};
+
+    stateMap[`amps`] = module.amps.toFixed(2);
+    stateMap[`amps_in`] = module.ampsIn.toFixed(2);
+    stateMap[`amps_out`] = module.ampsOut.toFixed(2);
+    stateMap[`cell_count`] = module.cellCount;
+    stateMap[`charge_capacity`] = module.chargeCapacity.toFixed(2);
+    stateMap[`charge_percentage`] = module.chargePercentage.toFixed(2);
+    stateMap[`charge_remaining`] = module.chargeRemaining.toFixed(2);
+    stateMap[`cycle_number`] = module.cycleNumber;
+    stateMap[`manufacturer_name`] = module.manufacturerName;
+    stateMap[`model`] = module.model;
+    stateMap[`serial`] = module.serial;
+    stateMap[`time_to_empty`] =
+      module.timeToEmpty !== 0 ? module.timeToEmpty.toFixed(2) : "unavailable";
+    stateMap[`time_to_full`] =
+      module.timeToFull !== 0 ? module.timeToFull.toFixed(2) : "unavailable";
+    stateMap[`volts`] = module.volts.toFixed(1);
+    stateMap[`watts`] = module.watts.toFixed(2);
+    stateMap[`watts_in`] = module.wattsIn.toFixed(2);
+    stateMap[`watts_out`] = module.wattsOut.toFixed(2);
+
+    for (let ci = 0; ci < module.cellCount; ci++) {
+      const cellNumberString = (ci + 1).toString().padStart(2, "0");
+      stateMap[`cells/${cellNumberString}/temperature`] =
+        module.cellTemperatures[ci].toFixed(1);
+      stateMap[`cells/${cellNumberString}/volts`] =
+        module.cellVoltages[ci].toFixed(1);
+    }
+
+    for (const [key, value] of Object.entries(stateMap)) {
+      const topic = `${process.env.MQTT_PREFIX!}/modules/${
+        module.serial
+      }/${key}`;
+      const payload = `${value}`;
+
+      log.info(`publishing: ${topic}: ${payload}`);
+      await mqttConn.publish(topic, payload);
+    }
+  },
 };
-const publishModuleStates = async (
-  mqttConn: Mqtt.AsyncMqttClient,
-  module: Module
-) => {
-  const stateMap: Record<string, unknown> = {};
 
-  stateMap[`amps`] = module.amps.toFixed(2);
-  stateMap[`amps_in`] = module.amps_in.toFixed(2);
-  stateMap[`amps_out`] = module.amps_out.toFixed(2);
-  stateMap[`cell_count`] = module.cellCount;
-  stateMap[`charge_capacity`] = module.chargeCapacity.toFixed(2);
-  stateMap[`charge_percentage`] = module.chargePercentage.toFixed(2);
-  stateMap[`charge_remaining`] = module.chargeRemaining.toFixed(2);
-  stateMap[`cycle_number`] = module.cycleNumber;
-  stateMap[`manufacturer_name`] = module.manufacturerName;
-  stateMap[`model`] = module.model;
-  stateMap[`serial`] = module.serial;
-  stateMap[`time_to_empty`] =
-    module.timeToEmpty !== 0 ? module.timeToEmpty.toFixed(2) : "unavailable";
-  stateMap[`time_to_full`] =
-    module.timeToFull !== 0 ? module.timeToFull.toFixed(2) : "unavailable";
-  stateMap[`volts`] = module.volts.toFixed(1);
-  stateMap[`watts`] = module.watts.toFixed(2);
-  stateMap[`watts_in`] = module.watts_in.toFixed(2);
-  stateMap[`watts_out`] = module.watts_out.toFixed(2);
-
-  for (let ci = 0; ci < module.cellCount; ci++) {
-    const cellNumberString = (ci + 1).toString().padStart(2, "0");
-    stateMap[`cells/${cellNumberString}/temperature`] =
-      module.cellTemperatures[ci].toFixed(1);
-    stateMap[`cells/${cellNumberString}/volts`] =
-      module.cellVoltages[ci].toFixed(1);
-  }
-
-  for (const [key, value] of Object.entries(stateMap)) {
-    const topic = `${process.env.MQTT_PREFIX!}/modules/${module.serial}/${key}`;
-    const payload = `${value}`;
-
-    log.info(`publishing: ${topic}: ${payload}`);
-    await mqttConn.publish(topic, payload);
-  }
-};
-
-(async () => {
+const main = async () => {
   log.info(`begin setup`);
+
   log.info(`Connecting to MQTT`);
   const mqttConn = await Mqtt.connectAsync(process.env.MQTT_URL!);
   log.info(`Connected to MQTT`);
@@ -653,31 +736,28 @@ const publishModuleStates = async (
   });
   log.info(`Connected to MODBUS`);
 
-  log.info(`begin configuring modules`);
-  let modules: Array<Module> = [];
-  for (let si = 1; si <= parseInt(process.env.SERVER_COUNT!); si++) {
-    const server = parseInt(process.env[`SERVER_${si}_MODBUS_ADDRESS`]!, 10);
-    log.info(`configuring HA for server ${server}`);
+  if (process.env.HOME_ASSISTANT_DISCOVERY_ENABLE! === "true") {
+    log.info(`begin configuring modules`);
 
-    const serverData = await queryServer(modbusConn, server);
+    let modules: Array<Module> = [];
+    for (let si = 1; si <= parseInt(process.env.SERVER_COUNT!); si++) {
+      const server = parseInt(process.env[`SERVER_${si}_MODBUS_ADDRESS`]!, 10);
+      log.info(`configuring HA for server ${server}`);
 
-    const module = moduleOf(serverData);
+      const serverData = await queryModbusServer(modbusConn, server);
+      const module = moduleOf(serverData);
 
-    if (process.env.HOME_ASSISTANT_DISCOVERY_ENABLE! === "true") {
-      await publishModuleConfigs(mqttConn, module);
+      await homeAssistantConfigFns.publishModule(mqttConn, module);
+
+      modules = [...modules, module];
     }
+    log.info(`finished configuring modules`);
 
-    modules = [...modules, module];
+    log.info(`begin configuring battery`);
+    const battery = batteryOf(modules);
+    await homeAssistantConfigFns.publishBattery(mqttConn, battery);
+    log.info(`finished configuring battery`);
   }
-  log.info(`finished configuring modules`);
-
-  log.info(`begin configuring battery`);
-  const battery = batteryOf(modules);
-
-  if (JSON.parse(process.env.HOME_ASSISTANT_DISCOVERY_ENABLE!)) {
-    await publishBatteryConfigs(mqttConn, battery);
-  }
-  log.info(`finished configuring battery`);
 
   log.info(`begin main loop`);
   for (;;) {
@@ -685,14 +765,16 @@ const publishModuleStates = async (
     for (let si = 1; si <= parseInt(process.env.SERVER_COUNT!); si++) {
       const server = parseInt(process.env[`SERVER_${si}_MODBUS_ADDRESS`]!, 10);
 
-      const serverData = await queryServer(modbusConn, server);
+      const serverData = await queryModbusServer(modbusConn, server);
       const module = moduleOf(serverData);
 
-      await publishModuleStates(mqttConn, module);
+      await stateFns.publishModule(mqttConn, module);
       modules = [...modules, module];
     }
 
     const battery = batteryOf(modules);
-    await publishBatteryStates(mqttConn, battery);
+    await stateFns.publishBattery(mqttConn, battery);
   }
-})();
+};
+
+main();
