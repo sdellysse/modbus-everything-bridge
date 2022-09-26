@@ -3,6 +3,9 @@ import Mqtt from "async-mqtt";
 import CRC32 from "crc-32";
 import { log, queryModbus, runForever, uniqueStrings } from "./utils";
 
+process.env.MODBUSTCP_HOST = "debian.lan";
+process.env.MODBUSTCP_PORT = "502";
+process.env.MQTT_URL = "tcp://debian.lan:1883";
 process.env.SERVERS = "[48, 49, 50, 51]";
 
 const queryServer = async (modbusConn: Modbus, server: number) => {
@@ -492,43 +495,42 @@ const publishModuleStates = async (
   }
 };
 
-const servers = JSON.parse(process.env.SERVERS);
-runForever({
-  setup: async () => {
-    log.info(`Connecting to MQTT`);
-    const mqttConn = await Mqtt.connectAsync("tcp://debian.lan:1883");
-    log.info(`Connected to MQTT`);
+(async () => {
+  const servers = JSON.parse(process.env.SERVERS!);
 
-    log.info(`Connecting to MODBUS`);
-    const modbusConn = new Modbus();
-    await modbusConn.connectTCP("debian.lan", {
-      port: 502,
-    });
-    log.info(`Connected to MODBUS`);
+  log.info(`begin setup`);
+  log.info(`Connecting to MQTT`);
+  const mqttConn = await Mqtt.connectAsync(process.env.MQTT_URL!);
+  log.info(`Connected to MQTT`);
 
-    log.info(`begin configuring modules`);
-    let modules: Array<Module> = [];
-    for (const server of servers) {
-      log.info(`configuring HA for server ${server}`);
+  log.info(`Connecting to MODBUS`);
+  const modbusConn = new Modbus();
+  await modbusConn.connectTCP(process.env.MODBUSTCP_HOST!, {
+    port: parseInt(process.env.MODBUSTCP_PORT!, 10),
+  });
+  log.info(`Connected to MODBUS`);
 
-      const serverData = await queryServer(modbusConn, server);
+  log.info(`begin configuring modules`);
+  let modules: Array<Module> = [];
+  for (const server of servers) {
+    log.info(`configuring HA for server ${server}`);
 
-      const module = moduleOf(serverData);
-      await publishModuleConfigs(mqttConn, module);
+    const serverData = await queryServer(modbusConn, server);
 
-      modules = [...modules, module];
-    }
-    log.info(`finished configuring modules`);
+    const module = moduleOf(serverData);
+    await publishModuleConfigs(mqttConn, module);
 
-    log.info(`begin configuring battery`);
-    const battery = batteryOf(modules);
-    await publishBatteryConfigs(mqttConn, battery);
-    log.info(`finished configuring battery`);
+    modules = [...modules, module];
+  }
+  log.info(`finished configuring modules`);
 
-    return <const>{ modbusConn, mqttConn };
-  },
+  log.info(`begin configuring battery`);
+  const battery = batteryOf(modules);
+  await publishBatteryConfigs(mqttConn, battery);
+  log.info(`finished configuring battery`);
 
-  loop: async ({ modbusConn, mqttConn }) => {
+  log.info(`begin main loop`);
+  for (;;) {
     let modules: Array<Module> = [];
     for (const server of servers) {
       const serverData = await queryServer(modbusConn, server);
@@ -540,7 +542,5 @@ runForever({
 
     const battery = batteryOf(modules);
     await publishBatteryStates(mqttConn, battery);
-  },
-
-  teardown: async ({ modbusConn, mqttConn }) => {},
-});
+  }
+})();

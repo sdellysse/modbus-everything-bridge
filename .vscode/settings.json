@@ -1,3 +1,9 @@
 {
-  "cSpell.words": ["alarminfo", "batterymodule", "homeassistant", "modbus"]
+  "cSpell.words": [
+    "alarminfo",
+    "batterymodule",
+    "homeassistant",
+    "modbus",
+    "MODBUSTCP"
+  ]
 }
