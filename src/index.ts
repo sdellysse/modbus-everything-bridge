@@ -80,8 +80,8 @@ const queryServer = async (modbusConn: Modbus, server: number) => {
           ],
           amperage: 0.01 * numberAt(5042, 1, "signed"),
           voltage: 0.1 * numberAt(5043, 1, "unsigned"),
-          energyRemaining: 0.001 * numberAt(5044, 2, "unsigned"),
-          energyCapacity: 0.001 * numberAt(5046, 2, "unsigned"),
+          chargeRemaining: 0.001 * numberAt(5044, 2, "unsigned"),
+          chargeCapacity: 0.001 * numberAt(5046, 2, "unsigned"),
           cycleNumber: 1.0 * numberAt(5048, 1, "signed"),
           chargeVoltageLimit: 0.1 * numberAt(5049, 1, "signed"),
           dischargeVoltageLimit: 0.1 * numberAt(5050, 1, "signed"),
@@ -118,18 +118,28 @@ const queryServer = async (modbusConn: Modbus, server: number) => {
 type ServerData = Awaited<ReturnType<typeof queryServer>>;
 
 const moduleOf = (data: ServerData) => {
+  const amps = data.amperage;
+  const volts = data.voltage;
+  const watts = volts * amps;
+  const chargeCapacity = data.chargeCapacity * volts;
+  const chargeRemaining = data.chargeRemaining * volts;
+
   return {
     ...data,
+    amps,
+    amps_in: amps > 0 ? amps : 0,
+    amps_out: amps < 0 ? Math.abs(amps) : 0,
     cellCount: data.cellVoltageCount,
-    energy: 100.0 * (data.energyRemaining / data.energyCapacity),
-    power: data.amperage * data.voltage,
+    chargeCapacity,
+    chargePercentage: 100.0 * (chargeRemaining / chargeCapacity),
+    chargeRemaining,
     serial: data.serial.replace(/[^A-Za-z0-9]/g, ""),
-    timeToFull:
-      data.amperage > 0
-        ? (data.energyCapacity - data.energyRemaining) / data.amperage
-        : 0,
-    timeToEmpty:
-      data.amperage < 0 ? Math.abs(data.energyRemaining / data.amperage) : 0,
+    timeToFull: watts > 0 ? (chargeCapacity - chargeRemaining) / watts : 0,
+    timeToEmpty: watts < 0 ? Math.abs(chargeRemaining / watts) : 0,
+    volts,
+    watts,
+    watts_in: watts > 0 ? watts : 0,
+    watts_out: watts < 0 ? Math.abs(watts) : 0,
   };
 };
 type Module = Awaited<ReturnType<typeof moduleOf>>;
@@ -140,46 +150,53 @@ const batteryOf = (modules: Array<Module>) => {
   );
 
   let sums = {
-    amperage: 0,
-    energy: 0,
-    energyCapacity: 0,
-    energyRemaining: 0,
+    amps: 0,
+    amps_in: 0,
+    amps_out: 0,
+    chargeCapacity: 0,
+    chargePercentage: 0,
+    chargeRemaining: 0,
     model: <Array<string>>[],
-    power: 0,
     serial: <Array<string>>[],
     timeToEmpty: 0,
     timeToFull: 0,
-    voltage: 0,
+    volts: 0,
+    watts: 0,
+    watts_in: 0,
+    watts_out: 0,
   };
   for (const module of sortedModules) {
     sums = {
-      amperage: sums.amperage + module.amperage,
-      energy: sums.energy + module.energy,
-      energyCapacity: sums.energyCapacity + module.energyCapacity,
-      energyRemaining: sums.energyRemaining + module.energyRemaining,
+      amps: sums.amps + module.amps,
+      amps_in: sums.amps_in + module.amps_in,
+      amps_out: sums.amps_out + module.amps_out,
+      chargePercentage: sums.chargePercentage + module.chargePercentage,
+      chargeCapacity: sums.chargeCapacity + module.chargeCapacity,
+      chargeRemaining: sums.chargeRemaining + module.chargeRemaining,
       model: [...sums.model, module.model],
-      power: sums.power + module.power,
       serial: [...sums.serial, module.serial],
       timeToEmpty: sums.timeToEmpty + module.timeToEmpty,
       timeToFull: sums.timeToFull + module.timeToFull,
-      voltage: sums.voltage + module.voltage,
+      volts: sums.volts + module.volts,
+      watts: sums.watts + module.watts,
+      watts_in: sums.watts_in + module.watts_in,
+      watts_out: sums.watts_out + module.watts_out,
     };
   }
 
   return {
     ...sums,
-    energy: sums.energy / modules.length,
+    chargePercentage: sums.chargePercentage / modules.length,
     model: `${modules.length.toString().padStart(2, "0")}x${Math.abs(
       CRC32.str(uniqueStrings(sums.model).join("."))
     )}`,
     modules,
-    power: sums.power / modules.length,
     serial: `${modules.length.toString().padStart(2, "0")}x${Math.abs(
       CRC32.str(uniqueStrings(sums.serial).join("."))
     )}`,
     timeToEmpty: sums.timeToEmpty / modules.length,
     timeToFull: sums.timeToFull / modules.length,
-    voltage: sums.voltage / modules.length,
+    volts: sums.volts / modules.length,
   };
 };
 type Battery = Awaited<ReturnType<typeof batteryOf>>;
@@ -190,35 +207,41 @@ const publishBatteryConfigs = async (
 ) => {
   const configs: Record<string, { name: string } & Record<string, unknown>> =
     {};
-  configs[`amperage`] = {
+  configs[`amps`] = {
     device_class: "current",
-    name: "Amperage",
+    name: "Amps",
     state_class: "measurement",
     unit_of_measurement: "A",
   };
-  configs[`energy`] = {
+  configs[`amps_in`] = {
+    device_class: "current",
+    name: "Amps In",
+    state_class: "measurement",
+    unit_of_measurement: "A",
+  };
+  configs[`amps_out`] = {
+    device_class: "current",
+    name: "Amps Out",
+    state_class: "measurement",
+    unit_of_measurement: "A",
+  };
+  configs[`charge_capacity`] = {
+    device_class: "energy",
+    name: "Charge Capacity",
+    state_class: "measurement",
+    unit_of_measurement: "Wh",
+  };
+  configs[`charge_percentage`] = {
     device_class: "battery",
-    name: "Energy",
+    name: "Charge Percentage",
     state_class: "measurement",
     unit_of_measurement: "%",
   };
-  configs[`energy_capacity`] = {
+  configs[`charge_remaining`] = {
     device_class: "energy",
-    name: "Energy Capacity",
+    name: "Charge Remaining",
     state_class: "measurement",
     unit_of_measurement: "Wh",
-  };
-  configs[`energy_remaining`] = {
-    device_class: "energy",
-    name: "Energy Remaining",
-    state_class: "measurement",
-    unit_of_measurement: "Wh",
-  };
-  configs[`power`] = {
-    device_class: "power",
-    name: "Power",
-    state_class: "measurement",
-    unit_of_measurement: "W",
   };
   configs[`time_to_empty`] = {
     device_class: "duration",
@@ -230,49 +253,30 @@ const publishBatteryConfigs = async (
     name: "Time To Full",
     unit_of_measurement: "h",
   };
-  configs[`voltage`] = {
+  configs[`volts`] = {
     device_class: "voltage",
-    name: "Voltage",
+    name: "Volts",
     state_class: "measurement",
     unit_of_measurement: "V",
   };
-  for (let mi = 0; mi < battery.modules.length; mi++) {
-    const module = battery.modules[mi];
-    const moduleNumberString = (mi + 1).toString().padStart(2, "0");
-
-    configs[`module_${moduleNumberString}_cell_count`] = {
-      entity_category: "diagnostic",
-      name: `Module ${moduleNumberString} Cell Count`,
-      state_class: "measurement",
-    };
-    configs[`module_${moduleNumberString}_cycle_number`] = {
-      entity_category: "diagnostic",
-      name: `Module ${moduleNumberString} Cycle Number`,
-      state_class: "measurement",
-    };
-
-    for (let ci = 0; ci < module.cellCount; ci++) {
-      const cellNumberString = (ci + 1).toString().padStart(2, "0");
-
-      configs[
-        `module_${moduleNumberString}_cell_${cellNumberString}_temperature`
-      ] = {
-        device_class: "temperature",
-        entity_category: "diagnostic",
-        name: `Module ${moduleNumberString} Cell ${cellNumberString} Temperature`,
-        state_class: "measurement",
-        unit_of_measurement: "°C",
-      };
-      configs[`module_${moduleNumberString}_cell_${cellNumberString}_voltage`] =
-        {
-          device_class: "voltage",
-          entity_category: "diagnostic",
-          name: `Module ${moduleNumberString} Cell ${cellNumberString} Voltage`,
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        };
-    }
-  }
+  configs[`watts`] = {
+    device_class: "current",
+    name: "Watts",
+    state_class: "measurement",
+    unit_of_measurement: "W",
+  };
+  configs[`watts_in`] = {
+    device_class: "current",
+    name: "Watts In",
+    state_class: "measurement",
+    unit_of_measurement: "W",
+  };
+  configs[`watts_out`] = {
+    device_class: "current",
+    name: "Watts Out",
+    state_class: "measurement",
+    unit_of_measurement: "W",
+  };
 
   for (const [property, props] of Object.entries(configs)) {
     const topic = `homeassistant/sensor/battery_${battery.serial}_${property}/config`;
@@ -303,9 +307,21 @@ const publishModuleConfigs = async (
 ) => {
   const configs: Record<string, { name: string } & Record<string, unknown>> =
     {};
-  configs[`amperage`] = {
+  configs[`amps`] = {
     device_class: "current",
-    name: "Amperage",
+    name: "Amps",
+    state_class: "measurement",
+    unit_of_measurement: "A",
+  };
+  configs[`amps_in`] = {
+    device_class: "current",
+    name: "Amps In",
+    state_class: "measurement",
+    unit_of_measurement: "A",
+  };
+  configs[`amps_out`] = {
+    device_class: "current",
+    name: "Amps Out",
     state_class: "measurement",
     unit_of_measurement: "A",
   };
@@ -314,34 +330,28 @@ const publishModuleConfigs = async (
     name: `Cell Count`,
     state_class: "measurement",
   };
+  configs[`charge_capacity`] = {
+    device_class: "energy",
+    name: "Charge Capacity",
+    state_class: "measurement",
+    unit_of_measurement: "Wh",
+  };
+  configs[`charge_percentage`] = {
+    device_class: "battery",
+    name: "Charge Percentage",
+    state_class: "measurement",
+    unit_of_measurement: "%",
+  };
+  configs[`charge_remaining`] = {
+    device_class: "energy",
+    name: "Charge Remaining",
+    state_class: "measurement",
+    unit_of_measurement: "Wh",
+  };
   configs[`cycle_number`] = {
     entity_category: "diagnostic",
     name: `Cycle Number`,
     state_class: "measurement",
-  };
-  configs[`energy`] = {
-    device_class: "battery",
-    name: "Energy",
-    state_class: "measurement",
-    unit_of_measurement: "%",
-  };
-  configs[`energy_capacity`] = {
-    device_class: "energy",
-    name: "Energy Capacity",
-    state_class: "measurement",
-    unit_of_measurement: "Wh",
-  };
-  configs[`energy_remaining`] = {
-    device_class: "energy",
-    name: "Energy Remaining",
-    state_class: "measurement",
-    unit_of_measurement: "Wh",
-  };
-  configs[`power`] = {
-    device_class: "power",
-    name: "Power",
-    state_class: "measurement",
-    unit_of_measurement: "W",
   };
   configs[`time_to_empty`] = {
     device_class: "duration",
@@ -353,11 +363,29 @@ const publishModuleConfigs = async (
     name: "Time To Full",
     unit_of_measurement: "h",
   };
-  configs[`voltage`] = {
+  configs[`volts`] = {
     device_class: "voltage",
-    name: "Voltage",
+    name: "Volts",
     state_class: "measurement",
     unit_of_measurement: "V",
+  };
+  configs[`watts`] = {
+    device_class: "current",
+    name: "Watts",
+    state_class: "measurement",
+    unit_of_measurement: "W",
+  };
+  configs[`watts_in`] = {
+    device_class: "current",
+    name: "Watts In",
+    state_class: "measurement",
+    unit_of_measurement: "W",
+  };
+  configs[`watts_out`] = {
+    device_class: "current",
+    name: "Watts Out",
+    state_class: "measurement",
+    unit_of_measurement: "W",
   };
 
   for (let ci = 0; ci < module.cellCount; ci++) {
@@ -370,10 +398,10 @@ const publishModuleConfigs = async (
       state_class: "measurement",
       unit_of_measurement: "°C",
     };
-    configs[`cell_${cellNumberString}_voltage`] = {
+    configs[`cell_${cellNumberString}_volts`] = {
       device_class: "voltage",
       entity_category: "diagnostic",
-      name: `Cell ${cellNumberString} Voltage`,
+      name: `Cell ${cellNumberString} Volts`,
       state_class: "measurement",
       unit_of_measurement: "V",
     };
@@ -409,40 +437,22 @@ const publishBatteryStates = async (
 ) => {
   const stateMap: Record<string, unknown> = {};
 
-  stateMap[`amperage`] = battery.amperage.toFixed(2);
-  stateMap[`energy`] = battery.energy.toFixed(2);
-  stateMap[`energy_capacity`] = (
-    battery.energyCapacity * battery.voltage
-  ).toFixed(3);
-  stateMap[`energy_remaining`] = (
-    battery.energyRemaining * battery.voltage
-  ).toFixed(3);
+  stateMap[`amps`] = battery.amps.toFixed(2);
+  stateMap[`amps_in`] = battery.amps_in.toFixed(2);
+  stateMap[`amps_out`] = battery.amps_out.toFixed(2);
+  stateMap[`charge_capacity`] = battery.chargeCapacity.toFixed(3);
+  stateMap[`charge_percentage`] = battery.chargePercentage.toFixed(2);
+  stateMap[`charge_remaining`] = battery.chargeRemaining.toFixed(3);
   stateMap[`model`] = battery.model;
-  stateMap[`power`] = battery.power.toFixed(2);
   stateMap[`serial`] = battery.serial;
   stateMap[`time_to_empty`] =
     battery.timeToEmpty !== 0 ? battery.timeToEmpty.toFixed(2) : "unavailable";
   stateMap[`time_to_full`] =
     battery.timeToFull !== 0 ? battery.timeToFull.toFixed(2) : "unavailable";
-  stateMap[`voltage`] = battery.voltage.toFixed(1);
-
-  for (let mi = 0; mi < battery.modules.length; mi++) {
-    const module = battery.modules[mi];
-
-    const moduleNumberString = (mi + 1).toString().padStart(2, "0");
-    stateMap[`module_${moduleNumberString}_cell_count`] = module.cellCount;
-    stateMap[`module_${moduleNumberString}_cycle_number`] = module.cycleNumber;
-
-    for (let ci = 0; ci < module.cellCount; ci++) {
-      const cellNumberString = (ci + 1).toString().padStart(2, "0");
-      stateMap[
-        `module_${moduleNumberString}_cell_${cellNumberString}_temperature`
-      ] = module.cellTemperatures[ci].toFixed(1);
-      stateMap[
-        `module_${moduleNumberString}_cell_${cellNumberString}_voltage`
-      ] = module.cellVoltages[ci].toFixed(1);
-    }
-  }
+  stateMap[`volts`] = battery.volts.toFixed(1);
+  stateMap[`watts`] = battery.watts.toFixed(2);
+  stateMap[`watts_in`] = battery.watts_in.toFixed(2);
+  stateMap[`watts_out`] = battery.watts_out.toFixed(2);
 
   for (const [key, value] of Object.entries(stateMap)) {
     const topic = `battery/battery/${battery.serial}/${key}`;
@@ -458,31 +468,31 @@ const publishModuleStates = async (
 ) => {
   const stateMap: Record<string, unknown> = {};
 
-  stateMap[`amperage`] = module.amperage.toFixed(2);
+  stateMap[`amps`] = module.amps.toFixed(2);
+  stateMap[`amps_in`] = module.amps_in.toFixed(2);
+  stateMap[`amps_out`] = module.amps_out.toFixed(2);
   stateMap[`cell_count`] = module.cellCount;
+  stateMap[`charge_capacity`] = module.chargeCapacity.toFixed(2);
+  stateMap[`charge_percentage`] = module.chargePercentage.toFixed(2);
+  stateMap[`charge_remaining`] = module.chargeRemaining.toFixed(2);
   stateMap[`cycle_number`] = module.cycleNumber;
-  stateMap[`energy`] = module.energy.toFixed(2);
-  stateMap[`energy_capacity`] = (
-    module.energyCapacity * module.voltage
-  ).toFixed(2);
-  stateMap[`energy_remaining`] = (
-    module.energyRemaining * module.voltage
-  ).toFixed(2);
   stateMap[`manufacturer_name`] = module.manufacturerName;
   stateMap[`model`] = module.model;
-  stateMap[`power`] = module.power.toFixed(3);
   stateMap[`serial`] = module.serial;
   stateMap[`time_to_empty`] =
     module.timeToEmpty !== 0 ? module.timeToEmpty.toFixed(2) : "unavailable";
   stateMap[`time_to_full`] =
     module.timeToFull !== 0 ? module.timeToFull.toFixed(2) : "unavailable";
-  stateMap[`voltage`] = module.voltage.toFixed(1);
+  stateMap[`volts`] = module.volts.toFixed(1);
+  stateMap[`watts`] = module.watts.toFixed(2);
+  stateMap[`watts_in`] = module.watts_in.toFixed(2);
+  stateMap[`watts_out`] = module.watts_out.toFixed(2);
 
   for (let ci = 0; ci < module.cellCount; ci++) {
     const cellNumberString = (ci + 1).toString().padStart(2, "0");
     stateMap[`cell_${cellNumberString}_temperature`] =
       module.cellTemperatures[ci].toFixed(1);
-    stateMap[`cell_${cellNumberString}_voltage`] =
+    stateMap[`cell_${cellNumberString}_volts`] =
       module.cellVoltages[ci].toFixed(1);
   }
 
