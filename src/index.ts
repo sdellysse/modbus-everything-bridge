@@ -124,6 +124,11 @@ const queryModbusServer = async (modbusConn: Modbus, server: number) => {
 };
 type ServerData = Awaited<ReturnType<typeof queryModbusServer>>;
 
+type Cell = {
+  cellNumber: number;
+  temperature: number;
+  voltage: number;
+};
 const moduleOf = (data: ServerData) => {
   const amps = data.amperage;
   const volts = data.voltage;
@@ -131,13 +136,27 @@ const moduleOf = (data: ServerData) => {
   const chargeCapacity = data.chargeCapacity * volts;
   const chargeRemaining = data.chargeRemaining * volts;
 
+  let cells: Array<Cell> = [];
+  for (let ci = 0; ci < data.cellVoltageCount; ci++) {
+    // For some reason, my modules report 4 for cellVoltageCount, but 3 for
+    // cellTemperatureCount, even though there are actually 4 cell temperature
+    // sensors. For now, I'm gonna ignore cellTempCount, but if anyone else
+    // ever uses this I'll see what we can do.
+    cells = [
+      ...cells,
+      {
+        cellNumber: ci + 1,
+        temperature: data.cellTemperatures[ci],
+        voltage: data.cellVoltages[ci],
+      },
+    ];
+  }
+
   return {
     amps,
     ampsIn: amps > 0 ? amps : 0,
     ampsOut: amps < 0 ? Math.abs(amps) : 0,
-    cellCount: data.cellVoltageCount,
-    cellTemperatures: data.cellTemperatures,
-    cellVoltages: data.cellVoltages,
+    cells,
     chargeCapacity,
     chargePercentage: 100.0 * (chargeRemaining / chargeCapacity),
     chargeRemaining,
@@ -387,6 +406,7 @@ const homeAssistantConfigFns = {
           device: {
             identifiers: [battery.serial],
             model: battery.model,
+            manufacturer: "battery2mqtt",
             name: `Battery ${battery.serial}`,
           },
           name: `Battery ${battery.serial} ${mapping.name}`,
@@ -585,8 +605,8 @@ const homeAssistantConfigFns = {
       },
     ];
 
-    for (let ci = 0; ci < module.cellCount; ci++) {
-      const cellNumberString = (ci + 1).toString().padStart(2, "0");
+    for (const cell of module.cells) {
+      const cellNumberString = cell.cellNumber.toString().padStart(2, "0");
 
       mappings = [
         ...mappings,
@@ -685,7 +705,7 @@ const stateFns = {
     stateMap[`amps`] = module.amps.toFixed(2);
     stateMap[`amps_in`] = module.ampsIn.toFixed(2);
     stateMap[`amps_out`] = module.ampsOut.toFixed(2);
-    stateMap[`cell_count`] = module.cellCount;
+    stateMap[`cell_count`] = module.cells.length;
     stateMap[`charge_capacity`] = module.chargeCapacity.toFixed(2);
     stateMap[`charge_percentage`] = module.chargePercentage.toFixed(2);
     stateMap[`charge_remaining`] = module.chargeRemaining.toFixed(2);
@@ -702,12 +722,12 @@ const stateFns = {
     stateMap[`watts_in`] = module.wattsIn.toFixed(2);
     stateMap[`watts_out`] = module.wattsOut.toFixed(2);
 
-    for (let ci = 0; ci < module.cellCount; ci++) {
-      const cellNumberString = (ci + 1).toString().padStart(2, "0");
+    for (const cell of module.cells) {
+      const cellNumberString = cell.cellNumber.toString().padStart(2, "0");
+
       stateMap[`cells/${cellNumberString}/temperature`] =
-        module.cellTemperatures[ci].toFixed(1);
-      stateMap[`cells/${cellNumberString}/volts`] =
-        module.cellVoltages[ci].toFixed(1);
+        cell.temperature.toFixed(1);
+      stateMap[`cells/${cellNumberString}/volts`] = cell.voltage.toFixed(1);
     }
 
     for (const [key, value] of Object.entries(stateMap)) {
