@@ -326,7 +326,12 @@ type HomeAssistantConfigMapping = {
   config: Record<string, unknown>;
 };
 const homeAssistantConfigFns = {
-  publishBattery: async (mqttConn: Mqtt.AsyncMqttClient, battery: Battery) => {
+  publishBattery: async (
+    mqttConn: Mqtt.AsyncMqttClient,
+    haPrefix: string,
+    mqttPrefix: string,
+    battery: Battery
+  ) => {
     let mappings: Array<HomeAssistantConfigMapping> = [];
     mappings = [
       ...mappings,
@@ -726,10 +731,8 @@ const homeAssistantConfigFns = {
     ];
 
     for (const mapping of mappings) {
-      const haPrefix = process.env.HOME_ASSISTANT_DISCOVERY_PREFIX!;
       const topic = `${haPrefix}/sensor/battery_${battery.serial}_${mapping.unique_id}/config`;
 
-      const mqttPrefix = process.env.MQTT_PREFIX!;
       const payload = JSON.stringify(
         {
           ...mapping.config,
@@ -753,7 +756,12 @@ const homeAssistantConfigFns = {
     }
   },
 
-  publishModule: async (mqttConn: Mqtt.AsyncMqttClient, module: Module) => {
+  publishModule: async (
+    mqttConn: Mqtt.AsyncMqttClient,
+    haPrefix: string,
+    mqttPrefix: string,
+    module: Module
+  ) => {
     let mappings: Array<HomeAssistantConfigMapping> = [];
 
     mappings = [
@@ -882,8 +890,8 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: `cycle_number`,
-        state_topic: `cycle_number`,
+        unique_id: `cycle`,
+        state_topic: `cycle`,
         name: `Cycle Number`,
         config: {
           entity_category: "diagnostic",
@@ -988,10 +996,7 @@ const homeAssistantConfigFns = {
       ];
     }
     for (const mapping of mappings) {
-      const haPrefix = process.env.HOME_ASSISTANT_DISCOVERY_PREFIX!;
       const topic = `${haPrefix}/sensor/batterymodule_${module.serial}_${mapping.unique_id}/config`;
-
-      const mqttPrefix = process.env.MQTT_PREFIX!;
       const payload = JSON.stringify(
         {
           ...mapping,
@@ -1017,7 +1022,11 @@ const homeAssistantConfigFns = {
 };
 
 const stateFns = {
-  publishBattery: async (mqttConn: Mqtt.AsyncMqttClient, battery: Battery) => {
+  publishBattery: async (
+    mqttConn: Mqtt.AsyncMqttClient,
+    mqttPrefix: string,
+    battery: Battery
+  ) => {
     const stateMap = {
       amperage: battery.amperage.toFixed(2),
       capacity: battery.capacity.toFixed(3),
@@ -1058,16 +1067,24 @@ const stateFns = {
       wattage: battery.wattage.toFixed(2),
     };
 
+    const topicPrefix = `${mqttPrefix}/battery/${battery.serial}`;
     for (const [key, value] of Object.entries(stateMap)) {
-      const mqttPrefix = process.env.MQTT_PREFIX!;
-      const topic = `${mqttPrefix}/battery/${battery.serial}/${key}`;
+      const topic = `${topicPrefix}/${key}`;
       const payload = `${value}`;
 
       log.info(`publishing: ${topic}: ${payload}`);
       await mqttConn.publish(topic, payload);
     }
+
+    for (const module of battery.modules) {
+      await stateFns.publishModule(mqttConn, topicPrefix, module);
+    }
   },
-  publishModule: async (mqttConn: Mqtt.AsyncMqttClient, module: Module) => {
+  publishModule: async (
+    mqttConn: Mqtt.AsyncMqttClient,
+    mqttPrefix: string,
+    module: Module
+  ) => {
     const stateMap = {
       amperage: module.amperage.toFixed(2),
       capacity: module.capacity.toFixed(2),
@@ -1106,7 +1123,6 @@ const stateFns = {
       ),
     };
     for (const [key, value] of Object.entries(stateMap)) {
-      const mqttPrefix = process.env.MQTT_PREFIX!;
       const topic = `${mqttPrefix}/modules/${module.serial}/${key}`;
       const payload = `${value}`;
 
@@ -1117,6 +1133,15 @@ const stateFns = {
 };
 
 const main = async () => {
+  const haPrefix = process.env.HOME_ASSISTANT_DISCOVERY_PREFIX!;
+  const mqttPrefix = process.env.MQTT_PREFIX!;
+  const serverCount = parseInt(process.env.SERVER_COUNT!);
+  const servers = new Array(serverCount)
+    .fill(undefined)
+    .map((_value, si) =>
+      parseInt(process.env[`SERVER_${si + 1}_MODBUS_ADDRESS`]!, 10)
+    );
+
   log.info(`begin setup`);
 
   log.info(`Connecting to MQTT`);
@@ -1134,14 +1159,18 @@ const main = async () => {
     log.info(`begin configuring modules`);
 
     let modules: Array<Module> = [];
-    for (let si = 1; si <= parseInt(process.env.SERVER_COUNT!); si++) {
-      const server = parseInt(process.env[`SERVER_${si}_MODBUS_ADDRESS`]!, 10);
+    for (const server of servers) {
       log.info(`configuring HA for server ${server}`);
 
       const serverData = await queryModbusServer(modbusConn, server);
       const module = moduleOf(serverData);
 
-      await homeAssistantConfigFns.publishModule(mqttConn, module);
+      await homeAssistantConfigFns.publishModule(
+        mqttConn,
+        haPrefix,
+        mqttPrefix,
+        module
+      );
 
       modules = [...modules, module];
     }
@@ -1149,25 +1178,28 @@ const main = async () => {
 
     log.info(`begin configuring battery`);
     const battery = batteryOf(modules);
-    await homeAssistantConfigFns.publishBattery(mqttConn, battery);
+    await homeAssistantConfigFns.publishBattery(
+      mqttConn,
+      haPrefix,
+      mqttPrefix,
+      battery
+    );
     log.info(`finished configuring battery`);
   }
 
   log.info(`begin main loop`);
   for (;;) {
     let modules: Array<Module> = [];
-    for (let si = 1; si <= parseInt(process.env.SERVER_COUNT!); si++) {
-      const server = parseInt(process.env[`SERVER_${si}_MODBUS_ADDRESS`]!, 10);
-
+    for (const server of servers) {
       const serverData = await queryModbusServer(modbusConn, server);
       const module = moduleOf(serverData);
 
-      await stateFns.publishModule(mqttConn, module);
+      await stateFns.publishModule(mqttConn, mqttPrefix, module);
       modules = [...modules, module];
     }
 
     const battery = batteryOf(modules);
-    await stateFns.publishBattery(mqttConn, battery);
+    await stateFns.publishBattery(mqttConn, mqttPrefix, battery);
   }
 };
 
