@@ -87,11 +87,11 @@ const queryModbusServer = async (modbusConn: Modbus, server: number) => {
           ],
           amperage: 0.01 * numberAt(5042, 1, "signed"),
           voltage: 0.1 * numberAt(5043, 1, "unsigned"),
-          chargeRemaining: 0.001 * numberAt(5044, 2, "unsigned"),
-          chargeCapacity: 0.001 * numberAt(5046, 2, "unsigned"),
-          cycleNumber: 1.0 * numberAt(5048, 1, "signed"),
-          chargeVoltageLimit: 0.1 * numberAt(5049, 1, "signed"),
-          dischargeVoltageLimit: 0.1 * numberAt(5050, 1, "signed"),
+          chargeAh: 0.001 * numberAt(5044, 2, "unsigned"),
+          capacityAh: 0.001 * numberAt(5046, 2, "unsigned"),
+          cycle: 1.0 * numberAt(5048, 1, "unsigned"),
+          chargeVoltageLimit: 0.1 * numberAt(5049, 1, "unsigned"),
+          dischargeVoltageLimit: 0.1 * numberAt(5050, 1, "unsigned"),
           chargeCurrentLimit: 0.01 * numberAt(5051, 1, "signed"),
           dischargeCurrentLimit: 0.01 * numberAt(5052, 1, "signed"),
         }
@@ -124,52 +124,69 @@ const queryModbusServer = async (modbusConn: Modbus, server: number) => {
 };
 type ServerData = Awaited<ReturnType<typeof queryModbusServer>>;
 
-type Cell = {
-  cellNumber: number;
-  temperature: number;
-  voltage: number;
-};
 const moduleOf = (data: ServerData) => {
-  const amps = data.amperage;
-  const volts = data.voltage;
-  const watts = volts * amps;
-  const chargeCapacity = data.chargeCapacity * volts;
-  const chargeRemaining = data.chargeRemaining * volts;
+  const amperage = data.amperage;
+  const capacity = data.capacityAh * data.voltage;
 
-  let cells: Array<Cell> = [];
-  for (let ci = 0; ci < data.cellVoltageCount; ci++) {
-    // For some reason, my modules report 4 for cellVoltageCount, but 3 for
-    // cellTemperatureCount, even though there are actually 4 cell temperature
-    // sensors. For now, I'm gonna ignore cellTempCount, but if anyone else
-    // ever uses this I'll see what we can do.
-    cells = [
-      ...cells,
-      {
-        cellNumber: ci + 1,
-        temperature: data.cellTemperatures[ci],
-        voltage: data.cellVoltages[ci],
-      },
-    ];
-  }
+  // For some reason, my modules report 4 for cellVoltageCount, but 3 for
+  // cellTemperatureCount, even though there are actually 4 cell temperature
+  // sensors. For now, I'm gonna ignore cellTempCount, but if anyone else
+  // ever uses this I'll see what we can do.
+  const cells = new Array(data.cellVoltageCount)
+    .fill(undefined)
+    .map((_value, ci) => ({
+      cellNumber: ci + 1,
+      temperature: data.cellTemperatures[ci],
+      voltage: data.cellVoltages[ci],
+    }));
+
+  const cellTemperatureMax = Math.max(...cells.map((cell) => cell.temperature));
+  const cellTemperatureMin = Math.min(...cells.map((cell) => cell.temperature));
+  const cellTemperatureVariance = cellTemperatureMax - cellTemperatureMin;
+
+  const cellVoltageMax = Math.max(...cells.map((cell) => cell.voltage));
+  const cellVoltageMin = Math.min(...cells.map((cell) => cell.voltage));
+  const cellVoltageVariance = cellVoltageMax - cellVoltageMin;
+
+  const charge = data.chargeAh * data.voltage;
+  const cycle = data.cycle;
+  const manufacturerName = data.manufacturerName;
+  const model = data.model;
+  const serial = data.serial.replace(/[^A-Za-z0-9]/g, "");
+  const soc = 100.0 * (data.chargeAh / data.capacityAh);
+
+  const temperatureSum = cells
+    .map((cell) => cell.temperature)
+    .reduce((acc, temperature) => acc + temperature, 0);
+  const temperature = temperatureSum / cells.length;
+  const timeToFull =
+    amperage > 0 ? (data.capacityAh - data.chargeAh) / amperage : 0;
+  const timeToEmpty = amperage < 0 ? Math.abs(data.chargeAh / amperage) : 0;
+
+  const voltage = data.voltage;
+  const wattage = data.amperage * data.voltage;
 
   return {
-    amps,
-    ampsIn: amps > 0 ? amps : 0,
-    ampsOut: amps < 0 ? Math.abs(amps) : 0,
+    amperage,
+    capacity,
     cells,
-    chargeCapacity,
-    chargePercentage: 100.0 * (chargeRemaining / chargeCapacity),
-    chargeRemaining,
-    cycleNumber: data.cycleNumber,
-    manufacturerName: data.manufacturerName,
-    model: data.model,
-    serial: data.serial.replace(/[^A-Za-z0-9]/g, ""),
-    timeToFull: watts > 0 ? (chargeCapacity - chargeRemaining) / watts : 0,
-    timeToEmpty: watts < 0 ? Math.abs(chargeRemaining / watts) : 0,
-    volts,
-    watts,
-    wattsIn: watts > 0 ? watts : 0,
-    wattsOut: watts < 0 ? Math.abs(watts) : 0,
+    cellTemperatureMax,
+    cellTemperatureMin,
+    cellTemperatureVariance,
+    cellVoltageMax,
+    cellVoltageMin,
+    cellVoltageVariance,
+    charge,
+    cycle,
+    manufacturerName,
+    model,
+    serial,
+    soc,
+    temperature,
+    timeToFull,
+    timeToEmpty,
+    voltage,
+    wattage,
   };
 };
 type Module = Awaited<ReturnType<typeof moduleOf>>;
@@ -180,53 +197,124 @@ const batteryOf = (modules: Array<Module>) => {
   );
 
   let sums = {
-    amps: 0,
-    ampsIn: 0,
-    ampsOut: 0,
-    chargeCapacity: 0,
-    chargePercentage: 0,
-    chargeRemaining: 0,
+    amperage: 0,
+    capacity: 0,
+    charge: 0,
     model: <Array<string>>[],
+    modules: <Array<Module>>[],
     serial: <Array<string>>[],
+    soc: 0,
+    temperature: 0,
     timeToEmpty: 0,
     timeToFull: 0,
-    volts: 0,
-    watts: 0,
-    wattsIn: 0,
-    wattsOut: 0,
+    voltage: 0,
+    wattage: 0,
   };
   for (const module of sortedModules) {
     sums = {
-      amps: sums.amps + module.amps,
-      ampsIn: sums.ampsIn + module.ampsIn,
-      ampsOut: sums.ampsOut + module.ampsOut,
-      chargePercentage: sums.chargePercentage + module.chargePercentage,
-      chargeCapacity: sums.chargeCapacity + module.chargeCapacity,
-      chargeRemaining: sums.chargeRemaining + module.chargeRemaining,
+      amperage: sums.amperage + module.amperage,
+      capacity: sums.capacity + module.capacity,
+      charge: sums.charge + module.charge,
       model: [...sums.model, module.model],
+      modules: [...sums.modules, module],
       serial: [...sums.serial, module.serial],
+      soc: sums.soc + module.soc,
+      temperature: sums.temperature + module.temperature,
       timeToEmpty: sums.timeToEmpty + module.timeToEmpty,
       timeToFull: sums.timeToFull + module.timeToFull,
-      volts: sums.volts + module.volts,
-      watts: sums.watts + module.watts,
-      wattsIn: sums.wattsIn + module.wattsIn,
-      wattsOut: sums.wattsOut + module.wattsOut,
+      voltage: sums.voltage + module.voltage,
+      wattage: sums.wattage + module.wattage,
     };
   }
 
+  const cellTemperatureMax = Math.max(
+    ...modules.map((module) => module.cellTemperatureMax)
+  );
+  const cellTemperatureMin = Math.min(
+    ...modules.map((module) => module.cellTemperatureMin)
+  );
+  const cellTemperatureVariance = cellTemperatureMax - cellTemperatureMin;
+
+  const cellVoltageMax = Math.max(
+    ...modules.map((module) => module.cellVoltageMax)
+  );
+  const cellVoltageMin = Math.min(
+    ...modules.map((module) => module.cellVoltageMin)
+  );
+  const cellVoltageVariance = cellVoltageMax - cellVoltageMin;
+
+  const model = `${modules.length.toString().padStart(2, "0")}x${Math.abs(
+    CRC32.str(uniqueStrings(sums.model).join("."))
+  )}`;
+
+  const moduleAmperageMax = Math.max(
+    ...modules.map((module) => module.amperage)
+  );
+  const moduleAmperageMin = Math.min(
+    ...modules.map((module) => module.amperage)
+  );
+  const moduleAmperageVariance = moduleAmperageMax - moduleAmperageMin;
+
+  const moduleCapacityMax = Math.max(
+    ...modules.map((module) => module.capacity)
+  );
+  const moduleCapacityMin = Math.min(
+    ...modules.map((module) => module.capacity)
+  );
+  const moduleCapacityVariance = moduleCapacityMax - moduleCapacityMin;
+
+  const moduleChargeMax = Math.max(...modules.map((module) => module.charge));
+  const moduleChargeMin = Math.min(...modules.map((module) => module.charge));
+  const moduleChargeVariance = moduleChargeMax - moduleChargeMin;
+
+  const moduleVoltageMax = Math.max(...modules.map((module) => module.voltage));
+  const moduleVoltageMin = Math.min(...modules.map((module) => module.voltage));
+  const moduleVoltageVariance = moduleVoltageMax - moduleVoltageMin;
+
+  const moduleWattageMax = Math.max(...modules.map((module) => module.wattage));
+  const moduleWattageMin = Math.min(...modules.map((module) => module.wattage));
+  const moduleWattageVariance = moduleWattageMax - moduleWattageMin;
+
+  const serial = `${modules.length.toString().padStart(2, "0")}x${Math.abs(
+    CRC32.str(uniqueStrings(sums.serial).join("."))
+  )}`;
+
+  const soc = sums.soc / modules.length;
+  const temperature = sums.temperature / modules.length;
+  const timeToEmpty = sums.timeToEmpty / modules.length;
+  const timeToFull = sums.timeToFull / modules.length;
+  const voltage = sums.voltage / modules.length;
+
   return {
     ...sums,
-    chargePercentage: sums.chargePercentage / modules.length,
-    model: `${modules.length.toString().padStart(2, "0")}x${Math.abs(
-      CRC32.str(uniqueStrings(sums.model).join("."))
-    )}`,
-    modules,
-    serial: `${modules.length.toString().padStart(2, "0")}x${Math.abs(
-      CRC32.str(uniqueStrings(sums.serial).join("."))
-    )}`,
-    timeToEmpty: sums.timeToEmpty / modules.length,
-    timeToFull: sums.timeToFull / modules.length,
-    volts: sums.volts / modules.length,
+    cellTemperatureMax,
+    cellTemperatureMin,
+    cellTemperatureVariance,
+    cellVoltageMax,
+    cellVoltageMin,
+    cellVoltageVariance,
+    model,
+    moduleAmperageMax,
+    moduleAmperageMin,
+    moduleAmperageVariance,
+    moduleCapacityMax,
+    moduleCapacityMin,
+    moduleCapacityVariance,
+    moduleChargeMax,
+    moduleChargeMin,
+    moduleChargeVariance,
+    moduleVoltageMax,
+    moduleVoltageMin,
+    moduleVoltageVariance,
+    moduleWattageMax,
+    moduleWattageMin,
+    moduleWattageVariance,
+    serial,
+    soc,
+    temperature,
+    timeToEmpty,
+    timeToFull,
+    voltage,
   };
 };
 type Battery = Awaited<ReturnType<typeof batteryOf>>;
@@ -243,9 +331,9 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        state_topic: "amps",
-        unique_id: "amps",
-        name: "Amps",
+        state_topic: "amperage",
+        unique_id: "amperage",
+        name: "Amperage",
         config: {
           device_class: "current",
           state_class: "measurement",
@@ -256,35 +344,9 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: "amps_in",
-        state_topic: "amps_in",
-        name: "Amps In",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "A",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `amps_out`,
-        state_topic: "amps_out",
-        name: "Amps Out",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "A",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `charge_capacity`,
-        state_topic: "charge_capacity",
-        name: "Charge Capacity",
+        unique_id: `capacity`,
+        state_topic: "capacity",
+        name: "Capacity",
         config: {
           device_class: "energy",
           state_class: "measurement",
@@ -295,26 +357,320 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: `charge_percentage`,
-        state_topic: "charge_percentage",
-        name: "Charge Percentage",
+        unique_id: `cell_temperature_max`,
+        state_topic: `cell_temperature_max`,
+        name: "Cell Temperature Maximum",
+        config: {
+          device_class: "temperature",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "°C",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_temperature_min`,
+        state_topic: `cell_temperature_min`,
+        name: "Cell Temperature Minimum",
+        config: {
+          device_class: "temperature",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "°C",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_temperature_variance`,
+        state_topic: `cell_temperature_variance`,
+        name: "Cell Temperature Variance",
+        config: {
+          device_class: "temperature",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "°C",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_voltage_max`,
+        state_topic: `cell_voltage_max`,
+        name: "Cell Voltage Maximum",
+        config: {
+          device_class: "voltage",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_voltage_min`,
+        state_topic: `cell_voltage_min`,
+        name: "Cell Voltage Minimum",
+        config: {
+          device_class: "voltage",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_voltage_variance`,
+        state_topic: `cell_voltage_variance`,
+        name: "Cell Voltage Variance",
+        config: {
+          device_class: "voltage",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `charge`,
+        state_topic: "charge",
+        name: "Charge",
+        config: {
+          device_class: "energy",
+          state_class: "measurement",
+          unit_of_measurement: "Wh",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_amperage_max`,
+        state_topic: `module_amperage_max`,
+        name: "Module Amperage Maximum",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "A",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_amperage_min`,
+        state_topic: `module_amperage_min`,
+        name: "Module Amperage Minimum",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "A",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_amperage_variance`,
+        state_topic: `module_amperage_variance`,
+        name: "Module Amperage Variance",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "A",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_capacity_max`,
+        state_topic: `module_capacity_max`,
+        name: "Module Capacity Maximum",
+        config: {
+          device_class: "energy",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "Wh",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_capacity_min`,
+        state_topic: `module_capacity_min`,
+        name: "Module Capacity Minimum",
+        config: {
+          device_class: "energy",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "Wh",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_capacity_variance`,
+        state_topic: `module_capacity_variance`,
+        name: "Module Capacity Variance",
+        config: {
+          device_class: "energy",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "Wh",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_charge_max`,
+        state_topic: `module_charge_max`,
+        name: "Module Charge Maximum",
+        config: {
+          device_class: "energy",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_charge_min`,
+        state_topic: `module_charge_min`,
+        name: "Module Charge Minimum",
+        config: {
+          device_class: "energy",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_charge_variance`,
+        state_topic: `module_charge_variance`,
+        name: "Module Charge Variance",
+        config: {
+          device_class: "energy",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_voltage_max`,
+        state_topic: `module_voltage_max`,
+        name: "Module Voltage Maximum",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_voltage_min`,
+        state_topic: `module_voltage_min`,
+        name: "Module Voltage Minimum",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_voltage_variance`,
+        state_topic: `module_voltage_variance`,
+        name: "Module Voltage Variance",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_wattage_max`,
+        state_topic: `module_wattage_max`,
+        name: "Module Wattage Maximum",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "W",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_wattage_min`,
+        state_topic: `module_wattage_min`,
+        name: "Module Wattage Minimum",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "W",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `module_wattage_variance`,
+        state_topic: `module_wattage_variance`,
+        name: "Module Wattage Variance",
+        config: {
+          device_class: "current",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "W",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `soc`,
+        state_topic: "soc",
+        name: "SOC",
         config: {
           device_class: "battery",
           state_class: "measurement",
           unit_of_measurement: "%",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `charge_remaining`,
-        state_topic: "charge_remaining",
-        name: "Charge Remaining",
-        config: {
-          device_class: "energy",
-          state_class: "measurement",
-          unit_of_measurement: "Wh",
         },
       },
     ];
@@ -345,9 +701,9 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: `volts`,
-        state_topic: `volts`,
-        name: "Volts",
+        unique_id: `voltage`,
+        state_topic: `voltage`,
+        name: "Voltage",
         config: {
           device_class: "voltage",
           state_class: "measurement",
@@ -358,35 +714,9 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: "watts",
-        state_topic: `watts`,
-        name: "Watts",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "W",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `watts_in`,
-        state_topic: `watts_in`,
-        name: "Watts In",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "W",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `watts_out`,
-        state_topic: `watts_out`,
-        name: "Watts Out",
+        unique_id: "wattage",
+        state_topic: `wattage`,
+        name: "Wattage",
         config: {
           device_class: "current",
           state_class: "measurement",
@@ -429,9 +759,9 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        state_topic: "amps",
-        unique_id: "amps",
-        name: "Amps",
+        state_topic: "amperage",
+        unique_id: "amperage",
+        name: "Amperage",
         config: {
           device_class: "current",
           state_class: "measurement",
@@ -442,47 +772,9 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: "amps_in",
-        state_topic: "amps_in",
-        name: "Amps In",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "A",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `amps_out`,
-        state_topic: "amps_out",
-        name: "Amps Out",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "A",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_count`,
-        state_topic: "cell_count",
-        name: `Cell Count`,
-        config: {
-          entity_category: "diagnostic",
-          state_class: "measurement",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `charge_capacity`,
-        state_topic: "charge_capacity",
-        name: "Charge Capacity",
+        unique_id: `capacity`,
+        state_topic: "capacity",
+        name: "Capacity",
         config: {
           device_class: "energy",
           state_class: "measurement",
@@ -493,22 +785,93 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: `charge_percentage`,
-        state_topic: "charge_percentage",
-        name: "Charge Percentage",
+        unique_id: `cell_temperature_max`,
+        state_topic: `cell_temperature_max`,
+        name: "Cell Temperature Maximum",
         config: {
-          device_class: "battery",
+          device_class: "temperature",
+          entity_category: "diagnostic",
           state_class: "measurement",
-          unit_of_measurement: "%",
+          unit_of_measurement: "°C",
         },
       },
     ];
     mappings = [
       ...mappings,
       {
-        unique_id: `charge_remaining`,
-        state_topic: "charge_remaining",
-        name: "Charge Remaining",
+        unique_id: `cell_temperature_min`,
+        state_topic: `cell_temperature_min`,
+        name: "Cell Temperature Minimum",
+        config: {
+          device_class: "temperature",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "°C",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_temperature_variance`,
+        state_topic: `cell_temperature_variance`,
+        name: "Cell Temperature Variance",
+        config: {
+          device_class: "temperature",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "°C",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_voltage_max`,
+        state_topic: `cell_voltage_max`,
+        name: "Cell Voltage Maximum",
+        config: {
+          device_class: "voltage",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_voltage_min`,
+        state_topic: `cell_voltage_min`,
+        name: "Cell Voltage Minimum",
+        config: {
+          device_class: "voltage",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `cell_voltage_variance`,
+        state_topic: `cell_voltage_variance`,
+        name: "Cell Voltage Variance",
+        config: {
+          device_class: "voltage",
+          entity_category: "diagnostic",
+          state_class: "measurement",
+          unit_of_measurement: "V",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `charge`,
+        state_topic: "charge",
+        name: "Charge",
         config: {
           device_class: "energy",
           state_class: "measurement",
@@ -525,6 +888,19 @@ const homeAssistantConfigFns = {
         config: {
           entity_category: "diagnostic",
           state_class: "measurement",
+        },
+      },
+    ];
+    mappings = [
+      ...mappings,
+      {
+        unique_id: `soc`,
+        state_topic: "soc",
+        name: "SOC",
+        config: {
+          device_class: "battery",
+          state_class: "measurement",
+          unit_of_measurement: "%",
         },
       },
     ];
@@ -555,9 +931,9 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: `volts`,
-        state_topic: `volts`,
-        name: "Volts",
+        unique_id: `voltage`,
+        state_topic: `voltage`,
+        name: "Voltage",
         config: {
           device_class: "voltage",
           state_class: "measurement",
@@ -568,35 +944,9 @@ const homeAssistantConfigFns = {
     mappings = [
       ...mappings,
       {
-        unique_id: "watts",
-        state_topic: `watts`,
-        name: "Watts",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "W",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `watts_in`,
-        state_topic: `watts_in`,
-        name: "Watts In",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "W",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `watts_out`,
-        state_topic: `watts_out`,
-        name: "Watts Out",
+        unique_id: "wattage",
+        state_topic: `wattage`,
+        name: "Wattage",
         config: {
           device_class: "current",
           state_class: "measurement",
@@ -625,9 +975,9 @@ const homeAssistantConfigFns = {
       mappings = [
         ...mappings,
         {
-          unique_id: `cell_${cellNumberString}_volts`,
-          state_topic: `cells/${cellNumberString}/volts`,
-          name: `Cell ${cellNumberString} Volts`,
+          unique_id: `cell_${cellNumberString}_voltage`,
+          state_topic: `cells/${cellNumberString}/voltage`,
+          name: `Cell ${cellNumberString} Voltage`,
           config: {
             device_class: "voltage",
             entity_category: "diagnostic",
@@ -668,31 +1018,49 @@ const homeAssistantConfigFns = {
 
 const stateFns = {
   publishBattery: async (mqttConn: Mqtt.AsyncMqttClient, battery: Battery) => {
-    const stateMap: Record<string, unknown> = {};
-
-    stateMap[`amps`] = battery.amps.toFixed(2);
-    stateMap[`amps_in`] = battery.ampsIn.toFixed(2);
-    stateMap[`amps_out`] = battery.ampsOut.toFixed(2);
-    stateMap[`charge_capacity`] = battery.chargeCapacity.toFixed(3);
-    stateMap[`charge_percentage`] = battery.chargePercentage.toFixed(2);
-    stateMap[`charge_remaining`] = battery.chargeRemaining.toFixed(3);
-    stateMap[`model`] = battery.model;
-    stateMap[`serial`] = battery.serial;
-    stateMap[`time_to_empty`] =
-      battery.timeToEmpty !== 0
-        ? battery.timeToEmpty.toFixed(2)
-        : "unavailable";
-    stateMap[`time_to_full`] =
-      battery.timeToFull !== 0 ? battery.timeToFull.toFixed(2) : "unavailable";
-    stateMap[`volts`] = battery.volts.toFixed(1);
-    stateMap[`watts`] = battery.watts.toFixed(2);
-    stateMap[`watts_in`] = battery.wattsIn.toFixed(2);
-    stateMap[`watts_out`] = battery.wattsOut.toFixed(2);
+    const stateMap = {
+      amperage: battery.amperage.toFixed(2),
+      capacity: battery.capacity.toFixed(3),
+      cell_temperature_max: battery.cellTemperatureMax.toFixed(2),
+      cell_temperature_min: battery.cellTemperatureMin.toFixed(2),
+      cell_temperature_variance: battery.cellTemperatureVariance.toFixed(2),
+      cell_voltage_max: battery.cellVoltageMax.toFixed(2),
+      cell_voltage_min: battery.cellVoltageMin.toFixed(2),
+      cell_voltage_variance: battery.cellVoltageVariance.toFixed(2),
+      charge: battery.charge.toFixed(3),
+      model: battery.model,
+      module_amperage_max: battery.moduleAmperageMax.toFixed(2),
+      module_amperage_min: battery.moduleAmperageMin.toFixed(2),
+      module_amperage_variance: battery.moduleAmperageVariance.toFixed(2),
+      module_capacity_max: battery.moduleCapacityMax.toFixed(2),
+      module_capacity_min: battery.moduleCapacityMin.toFixed(2),
+      module_capacity_variance: battery.moduleCapacityVariance.toFixed(2),
+      module_charge_max: battery.moduleChargeMax.toFixed(2),
+      module_charge_min: battery.moduleChargeMin.toFixed(2),
+      module_charge_variance: battery.moduleChargeVariance.toFixed(2),
+      module_voltage_max: battery.moduleVoltageMax.toFixed(2),
+      module_voltage_min: battery.moduleVoltageMin.toFixed(2),
+      module_voltage_variance: battery.moduleVoltageVariance.toFixed(2),
+      module_wattage_max: battery.moduleWattageMax.toFixed(2),
+      module_wattage_min: battery.moduleWattageMin.toFixed(2),
+      module_wattage_variance: battery.moduleWattageVariance.toFixed(2),
+      serial: battery.serial,
+      soc: battery.soc.toFixed(2),
+      time_to_empty:
+        battery.timeToEmpty !== 0
+          ? battery.timeToEmpty.toFixed(2)
+          : "unavailable",
+      time_to_full:
+        battery.timeToFull !== 0
+          ? battery.timeToFull.toFixed(2)
+          : "unavailable",
+      voltage: battery.voltage.toFixed(1),
+      wattage: battery.wattage.toFixed(2),
+    };
 
     for (const [key, value] of Object.entries(stateMap)) {
-      const topic = `${process.env.MQTT_PREFIX!}/battery/${
-        battery.serial
-      }/${key}`;
+      const mqttPrefix = process.env.MQTT_PREFIX!;
+      const topic = `${mqttPrefix}/battery/${battery.serial}/${key}`;
       const payload = `${value}`;
 
       log.info(`publishing: ${topic}: ${payload}`);
@@ -700,40 +1068,46 @@ const stateFns = {
     }
   },
   publishModule: async (mqttConn: Mqtt.AsyncMqttClient, module: Module) => {
-    const stateMap: Record<string, unknown> = {};
+    const stateMap = {
+      amperage: module.amperage.toFixed(2),
+      capacity: module.capacity.toFixed(2),
+      cell_temperature_max: module.cellTemperatureMax.toFixed(2),
+      cell_temperature_min: module.cellTemperatureMin.toFixed(2),
+      cell_temperature_variance: module.cellTemperatureVariance.toFixed(2),
+      cell_voltage_max: module.cellVoltageMax.toFixed(2),
+      cell_voltage_min: module.cellVoltageMin.toFixed(2),
+      cell_voltage_variance: module.cellVoltageVariance.toFixed(2),
+      charge: module.charge.toFixed(2),
+      cycle: module.cycle,
+      manufacturer_name: module.manufacturerName,
+      model: module.model,
+      serial: module.serial,
+      soc: module.soc.toFixed(2),
+      time_to_empty:
+        module.timeToEmpty !== 0
+          ? module.timeToEmpty.toFixed(2)
+          : "unavailable",
+      time_to_full:
+        module.timeToFull !== 0 ? module.timeToFull.toFixed(2) : "unavailable",
+      voltage: module.voltage.toFixed(1),
+      wattage: module.wattage.toFixed(2),
 
-    stateMap[`amps`] = module.amps.toFixed(2);
-    stateMap[`amps_in`] = module.ampsIn.toFixed(2);
-    stateMap[`amps_out`] = module.ampsOut.toFixed(2);
-    stateMap[`cell_count`] = module.cells.length;
-    stateMap[`charge_capacity`] = module.chargeCapacity.toFixed(2);
-    stateMap[`charge_percentage`] = module.chargePercentage.toFixed(2);
-    stateMap[`charge_remaining`] = module.chargeRemaining.toFixed(2);
-    stateMap[`cycle_number`] = module.cycleNumber;
-    stateMap[`manufacturer_name`] = module.manufacturerName;
-    stateMap[`model`] = module.model;
-    stateMap[`serial`] = module.serial;
-    stateMap[`time_to_empty`] =
-      module.timeToEmpty !== 0 ? module.timeToEmpty.toFixed(2) : "unavailable";
-    stateMap[`time_to_full`] =
-      module.timeToFull !== 0 ? module.timeToFull.toFixed(2) : "unavailable";
-    stateMap[`volts`] = module.volts.toFixed(1);
-    stateMap[`watts`] = module.watts.toFixed(2);
-    stateMap[`watts_in`] = module.wattsIn.toFixed(2);
-    stateMap[`watts_out`] = module.wattsOut.toFixed(2);
-
-    for (const cell of module.cells) {
-      const cellNumberString = cell.cellNumber.toString().padStart(2, "0");
-
-      stateMap[`cells/${cellNumberString}/temperature`] =
-        cell.temperature.toFixed(1);
-      stateMap[`cells/${cellNumberString}/volts`] = cell.voltage.toFixed(1);
-    }
-
+      ...Object.fromEntries(
+        module.cells.flatMap((cell) => {
+          const cellNumberString = cell.cellNumber.toString().padStart(2, "0");
+          return [
+            [
+              `cells/${cellNumberString}/temperature`,
+              cell.temperature.toFixed(1),
+            ],
+            [`cells/${cellNumberString}/voltage`, cell.voltage.toFixed(1)],
+          ];
+        })
+      ),
+    };
     for (const [key, value] of Object.entries(stateMap)) {
-      const topic = `${process.env.MQTT_PREFIX!}/modules/${
-        module.serial
-      }/${key}`;
+      const mqttPrefix = process.env.MQTT_PREFIX!;
+      const topic = `${mqttPrefix}/modules/${module.serial}/${key}`;
       const payload = `${value}`;
 
       log.info(`publishing: ${topic}: ${payload}`);
