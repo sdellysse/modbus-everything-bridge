@@ -325,6 +325,166 @@ type HomeAssistantConfigMapping = {
   name: string;
   config: Record<string, unknown>;
 };
+const commonMappings = {
+  amperage: {
+    state_topic: "amperage",
+    unique_id: "amperage",
+    name: "Amperage",
+    config: {
+      device_class: "current",
+      icon: "mdi:current-dc",
+      state_class: "measurement",
+      unit_of_measurement: "A",
+    },
+  },
+  capacity: {
+    unique_id: `capacity`,
+    state_topic: "capacity",
+    name: "Capacity",
+    config: {
+      device_class: "energy",
+      icon: "mdi:battery",
+      state_class: "measurement",
+      unit_of_measurement: "Wh",
+    },
+  },
+  cellTemperatureMax: {
+    unique_id: `cell_temperature_max`,
+    state_topic: `cell_temperature_max`,
+    name: "Cell Temperature Maximum",
+    config: {
+      device_class: "temperature",
+      entity_category: "diagnostic",
+      icon: "mdi:thermometer-chevron-up",
+      state_class: "measurement",
+      unit_of_measurement: "°C",
+    },
+  },
+  cellTemperatureMin: {
+    unique_id: `cell_temperature_min`,
+    state_topic: `cell_temperature_min`,
+    name: "Cell Temperature Minimum",
+    config: {
+      device_class: "temperature",
+      entity_category: "diagnostic",
+      icon: "mdi:thermometer-chevron-down",
+      state_class: "measurement",
+      unit_of_measurement: "°C",
+    },
+  },
+  cellTemperatureVariance: {
+    unique_id: `cell_temperature_variance`,
+    state_topic: `cell_temperature_variance`,
+    name: "Cell Temperature Variance",
+    config: {
+      device_class: "temperature",
+      entity_category: "diagnostic",
+      icon: "mdi:thermometer-minus",
+      state_class: "measurement",
+      unit_of_measurement: "°C",
+    },
+  },
+  cellVoltageMax: {
+    unique_id: `cell_voltage_max`,
+    state_topic: `cell_voltage_max`,
+    name: "Cell Voltage Maximum",
+    config: {
+      device_class: "voltage",
+      entity_category: "diagnostic",
+      icon: "mdi:flash-triangle-outline",
+      state_class: "measurement",
+      unit_of_measurement: "V",
+    },
+  },
+  cellVoltageMin: {
+    unique_id: `cell_voltage_min`,
+    state_topic: `cell_voltage_min`,
+    name: "Cell Voltage Minimum",
+    config: {
+      device_class: "voltage",
+      entity_category: "diagnostic",
+      icon: "mdi:flash-triangle-outline",
+      state_class: "measurement",
+      unit_of_measurement: "V",
+    },
+  },
+  cellVoltageVariance: {
+    unique_id: `cell_voltage_variance`,
+    state_topic: `cell_voltage_variance`,
+    name: "Cell Voltage Variance",
+    config: {
+      device_class: "voltage",
+      entity_category: "diagnostic",
+      icon: "mdi:flash-triangle-outline",
+      state_class: "measurement",
+      unit_of_measurement: "V",
+    },
+  },
+  charge: {
+    unique_id: `charge`,
+    state_topic: "charge",
+    name: "Charge",
+    config: {
+      device_class: "energy",
+      icon: "mdi:battery-50",
+      state_class: "measurement",
+      unit_of_measurement: "Wh",
+    },
+  },
+  soc: {
+    unique_id: `soc`,
+    state_topic: "soc",
+    name: "SOC",
+    config: {
+      device_class: "battery",
+      icon: "mdi:percent",
+      state_class: "measurement",
+      unit_of_measurement: "%",
+    },
+  },
+  timeToEmpty: {
+    unique_id: `time_to_empty`,
+    state_topic: `time_to_empty`,
+    name: "Time To Empty",
+    config: {
+      device_class: "duration",
+      icon: "mdi:timer-remove",
+      unit_of_measurement: "h",
+    },
+  },
+  timeToFull: {
+    unique_id: `time_to_full`,
+    state_topic: `time_to_full`,
+    name: "Time To Full",
+    config: {
+      device_class: "duration",
+      icon: "mdi:timer-check",
+      unit_of_measurement: "h",
+    },
+  },
+  voltage: {
+    unique_id: `voltage`,
+    state_topic: `voltage`,
+    name: "Voltage",
+    config: {
+      device_class: "voltage",
+      icon: "mdi:flash-triangle-outline",
+      state_class: "measurement",
+      unit_of_measurement: "V",
+    },
+  },
+  wattage: {
+    unique_id: "wattage",
+    state_topic: `wattage`,
+    name: "Wattage",
+    config: {
+      device_class: "current",
+      icon: "mdi:current-dc",
+      state_class: "measurement",
+      unit_of_measurement: "W",
+    },
+  },
+};
 const homeAssistantConfigFns = {
   publishBattery: async (
     mqttConn: Mqtt.AsyncMqttClient,
@@ -333,129 +493,15 @@ const homeAssistantConfigFns = {
     battery: Battery
   ) => {
     let mappings: Array<HomeAssistantConfigMapping> = [];
-    mappings = [
-      ...mappings,
-      {
-        state_topic: "amperage",
-        unique_id: "amperage",
-        name: "Amperage",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "A",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `capacity`,
-        state_topic: "capacity",
-        name: "Capacity",
-        config: {
-          device_class: "energy",
-          state_class: "measurement",
-          unit_of_measurement: "Wh",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_temperature_max`,
-        state_topic: `cell_temperature_max`,
-        name: "Cell Temperature Maximum",
-        config: {
-          device_class: "temperature",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "°C",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_temperature_min`,
-        state_topic: `cell_temperature_min`,
-        name: "Cell Temperature Minimum",
-        config: {
-          device_class: "temperature",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "°C",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_temperature_variance`,
-        state_topic: `cell_temperature_variance`,
-        name: "Cell Temperature Variance",
-        config: {
-          device_class: "temperature",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "°C",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_voltage_max`,
-        state_topic: `cell_voltage_max`,
-        name: "Cell Voltage Maximum",
-        config: {
-          device_class: "voltage",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_voltage_min`,
-        state_topic: `cell_voltage_min`,
-        name: "Cell Voltage Minimum",
-        config: {
-          device_class: "voltage",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_voltage_variance`,
-        state_topic: `cell_voltage_variance`,
-        name: "Cell Voltage Variance",
-        config: {
-          device_class: "voltage",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `charge`,
-        state_topic: "charge",
-        name: "Charge",
-        config: {
-          device_class: "energy",
-          state_class: "measurement",
-          unit_of_measurement: "Wh",
-        },
-      },
-    ];
+    mappings = [...mappings, commonMappings.amperage];
+    mappings = [...mappings, commonMappings.capacity];
+    mappings = [...mappings, commonMappings.cellTemperatureMax];
+    mappings = [...mappings, commonMappings.cellTemperatureMin];
+    mappings = [...mappings, commonMappings.cellTemperatureVariance];
+    mappings = [...mappings, commonMappings.cellVoltageMax];
+    mappings = [...mappings, commonMappings.cellVoltageMin];
+    mappings = [...mappings, commonMappings.cellVoltageVariance];
+    mappings = [...mappings, commonMappings.charge];
     mappings = [
       ...mappings,
       {
@@ -464,6 +510,7 @@ const homeAssistantConfigFns = {
         name: "Module Amperage Maximum",
         config: {
           device_class: "current",
+          icon: "mdi:current-dc",
           entity_category: "diagnostic",
           state_class: "measurement",
           unit_of_measurement: "A",
@@ -479,6 +526,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "current",
           entity_category: "diagnostic",
+          icon: "mdi:current-dc",
           state_class: "measurement",
           unit_of_measurement: "A",
         },
@@ -493,6 +541,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "current",
           entity_category: "diagnostic",
+          icon: "mdi:current-dc",
           state_class: "measurement",
           unit_of_measurement: "A",
         },
@@ -507,6 +556,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "energy",
           entity_category: "diagnostic",
+          icon: "mdi:battery-arrow-up",
           state_class: "measurement",
           unit_of_measurement: "Wh",
         },
@@ -521,6 +571,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "energy",
           entity_category: "diagnostic",
+          icon: "mdi:battery-arrow-down",
           state_class: "measurement",
           unit_of_measurement: "Wh",
         },
@@ -534,6 +585,7 @@ const homeAssistantConfigFns = {
         name: "Module Capacity Variance",
         config: {
           device_class: "energy",
+          icon: "mdi:battery-minus",
           entity_category: "diagnostic",
           state_class: "measurement",
           unit_of_measurement: "Wh",
@@ -548,9 +600,10 @@ const homeAssistantConfigFns = {
         name: "Module Charge Maximum",
         config: {
           device_class: "energy",
+          icon: "mdi:battery-arrow-up-outline",
           entity_category: "diagnostic",
           state_class: "measurement",
-          unit_of_measurement: "",
+          unit_of_measurement: "Wh",
         },
       },
     ];
@@ -562,9 +615,10 @@ const homeAssistantConfigFns = {
         name: "Module Charge Minimum",
         config: {
           device_class: "energy",
+          icon: "mdi:battery-arrow-down-outline",
           entity_category: "diagnostic",
           state_class: "measurement",
-          unit_of_measurement: "",
+          unit_of_measurement: "Wh",
         },
       },
     ];
@@ -576,9 +630,10 @@ const homeAssistantConfigFns = {
         name: "Module Charge Variance",
         config: {
           device_class: "energy",
+          icon: "mdi:battery-minus-outline",
           entity_category: "diagnostic",
           state_class: "measurement",
-          unit_of_measurement: "",
+          unit_of_measurement: "Wh",
         },
       },
     ];
@@ -591,6 +646,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "current",
           entity_category: "diagnostic",
+          icon: "mdi:flash-triangle-outline",
           state_class: "measurement",
           unit_of_measurement: "V",
         },
@@ -605,6 +661,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "current",
           entity_category: "diagnostic",
+          icon: "mdi:flash-triangle-outline",
           state_class: "measurement",
           unit_of_measurement: "V",
         },
@@ -619,6 +676,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "current",
           entity_category: "diagnostic",
+          icon: "mdi:flash-triangle-outline",
           state_class: "measurement",
           unit_of_measurement: "V",
         },
@@ -633,6 +691,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "current",
           entity_category: "diagnostic",
+          icon: "mdi:current-dc",
           state_class: "measurement",
           unit_of_measurement: "W",
         },
@@ -647,6 +706,7 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "current",
           entity_category: "diagnostic",
+          icon: "mdi:current-dc",
           state_class: "measurement",
           unit_of_measurement: "W",
         },
@@ -661,74 +721,17 @@ const homeAssistantConfigFns = {
         config: {
           device_class: "current",
           entity_category: "diagnostic",
+          icon: "mdi:current-dc",
           state_class: "measurement",
           unit_of_measurement: "W",
         },
       },
     ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `soc`,
-        state_topic: "soc",
-        name: "SOC",
-        config: {
-          device_class: "battery",
-          state_class: "measurement",
-          unit_of_measurement: "%",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `time_to_empty`,
-        state_topic: `time_to_empty`,
-        name: "Time To Empty",
-        config: {
-          device_class: "duration",
-          unit_of_measurement: "h",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `time_to_full`,
-        state_topic: `time_to_full`,
-        name: "Time To Full",
-        config: {
-          device_class: "duration",
-          unit_of_measurement: "h",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `voltage`,
-        state_topic: `voltage`,
-        name: "Voltage",
-        config: {
-          device_class: "voltage",
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: "wattage",
-        state_topic: `wattage`,
-        name: "Wattage",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "W",
-        },
-      },
-    ];
+    mappings = [...mappings, commonMappings.soc];
+    mappings = [...mappings, commonMappings.timeToEmpty];
+    mappings = [...mappings, commonMappings.timeToFull];
+    mappings = [...mappings, commonMappings.voltage];
+    mappings = [...mappings, commonMappings.wattage];
 
     for (const mapping of mappings) {
       const topic = `${haPrefix}/sensor/battery_${battery.serial}_${mapping.unique_id}/config`;
@@ -764,129 +767,15 @@ const homeAssistantConfigFns = {
   ) => {
     let mappings: Array<HomeAssistantConfigMapping> = [];
 
-    mappings = [
-      ...mappings,
-      {
-        state_topic: "amperage",
-        unique_id: "amperage",
-        name: "Amperage",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "A",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `capacity`,
-        state_topic: "capacity",
-        name: "Capacity",
-        config: {
-          device_class: "energy",
-          state_class: "measurement",
-          unit_of_measurement: "Wh",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_temperature_max`,
-        state_topic: `cell_temperature_max`,
-        name: "Cell Temperature Maximum",
-        config: {
-          device_class: "temperature",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "°C",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_temperature_min`,
-        state_topic: `cell_temperature_min`,
-        name: "Cell Temperature Minimum",
-        config: {
-          device_class: "temperature",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "°C",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_temperature_variance`,
-        state_topic: `cell_temperature_variance`,
-        name: "Cell Temperature Variance",
-        config: {
-          device_class: "temperature",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "°C",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_voltage_max`,
-        state_topic: `cell_voltage_max`,
-        name: "Cell Voltage Maximum",
-        config: {
-          device_class: "voltage",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_voltage_min`,
-        state_topic: `cell_voltage_min`,
-        name: "Cell Voltage Minimum",
-        config: {
-          device_class: "voltage",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `cell_voltage_variance`,
-        state_topic: `cell_voltage_variance`,
-        name: "Cell Voltage Variance",
-        config: {
-          device_class: "voltage",
-          entity_category: "diagnostic",
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `charge`,
-        state_topic: "charge",
-        name: "Charge",
-        config: {
-          device_class: "energy",
-          state_class: "measurement",
-          unit_of_measurement: "Wh",
-        },
-      },
-    ];
+    mappings = [...mappings, commonMappings.amperage];
+    mappings = [...mappings, commonMappings.capacity];
+    mappings = [...mappings, commonMappings.cellTemperatureMax];
+    mappings = [...mappings, commonMappings.cellTemperatureMin];
+    mappings = [...mappings, commonMappings.cellTemperatureVariance];
+    mappings = [...mappings, commonMappings.cellVoltageMax];
+    mappings = [...mappings, commonMappings.cellVoltageMin];
+    mappings = [...mappings, commonMappings.cellVoltageVariance];
+    mappings = [...mappings, commonMappings.charge];
     mappings = [
       ...mappings,
       {
@@ -899,69 +788,11 @@ const homeAssistantConfigFns = {
         },
       },
     ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `soc`,
-        state_topic: "soc",
-        name: "SOC",
-        config: {
-          device_class: "battery",
-          state_class: "measurement",
-          unit_of_measurement: "%",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `time_to_empty`,
-        state_topic: `time_to_empty`,
-        name: "Time To Empty",
-        config: {
-          device_class: "duration",
-          unit_of_measurement: "h",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `time_to_full`,
-        state_topic: `time_to_full`,
-        name: "Time To Full",
-        config: {
-          device_class: "duration",
-          unit_of_measurement: "h",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: `voltage`,
-        state_topic: `voltage`,
-        name: "Voltage",
-        config: {
-          device_class: "voltage",
-          state_class: "measurement",
-          unit_of_measurement: "V",
-        },
-      },
-    ];
-    mappings = [
-      ...mappings,
-      {
-        unique_id: "wattage",
-        state_topic: `wattage`,
-        name: "Wattage",
-        config: {
-          device_class: "current",
-          state_class: "measurement",
-          unit_of_measurement: "W",
-        },
-      },
-    ];
+    mappings = [...mappings, commonMappings.soc];
+    mappings = [...mappings, commonMappings.timeToEmpty];
+    mappings = [...mappings, commonMappings.timeToFull];
+    mappings = [...mappings, commonMappings.voltage];
+    mappings = [...mappings, commonMappings.wattage];
 
     for (const cell of module.cells) {
       const cellNumberString = cell.cellNumber.toString().padStart(2, "0");
@@ -975,6 +806,7 @@ const homeAssistantConfigFns = {
           config: {
             device_class: "temperature",
             entity_category: "diagnostic",
+            icon: "mdi:thermometer",
             state_class: "measurement",
             unit_of_measurement: "°C",
           },
@@ -989,6 +821,7 @@ const homeAssistantConfigFns = {
           config: {
             device_class: "voltage",
             entity_category: "diagnostic",
+            icon: "mdi:flash-triangle-outline",
             state_class: "measurement",
             unit_of_measurement: "V",
           },
@@ -999,7 +832,7 @@ const homeAssistantConfigFns = {
       const topic = `${haPrefix}/sensor/batterymodule_${module.serial}_${mapping.unique_id}/config`;
       const payload = JSON.stringify(
         {
-          ...mapping,
+          ...mapping.config,
           device: {
             identifiers: [module.serial],
             manufacturer: module.manufacturerName,
@@ -1021,6 +854,25 @@ const homeAssistantConfigFns = {
   },
 };
 
+const commonStateMap = (bm: Battery | Module) => ({
+  amperage: bm.amperage.toFixed(2),
+  capacity: bm.capacity.toFixed(3),
+  cell_temperature_max: bm.cellTemperatureMax.toFixed(2),
+  cell_temperature_min: bm.cellTemperatureMin.toFixed(2),
+  cell_temperature_variance: bm.cellTemperatureVariance.toFixed(2),
+  cell_voltage_max: bm.cellVoltageMax.toFixed(2),
+  cell_voltage_min: bm.cellVoltageMin.toFixed(2),
+  cell_voltage_variance: bm.cellVoltageVariance.toFixed(2),
+  charge: bm.charge.toFixed(3),
+  model: bm.model,
+  serial: bm.serial,
+  soc: bm.soc.toFixed(2),
+  time_to_empty:
+    bm.timeToEmpty !== 0 ? bm.timeToEmpty.toFixed(2) : "unavailable",
+  time_to_full: bm.timeToFull !== 0 ? bm.timeToFull.toFixed(2) : "unavailable",
+  voltage: bm.voltage.toFixed(1),
+  wattage: bm.wattage.toFixed(2),
+});
 const stateFns = {
   publishBattery: async (
     mqttConn: Mqtt.AsyncMqttClient,
@@ -1028,16 +880,7 @@ const stateFns = {
     battery: Battery
   ) => {
     const stateMap = {
-      amperage: battery.amperage.toFixed(2),
-      capacity: battery.capacity.toFixed(3),
-      cell_temperature_max: battery.cellTemperatureMax.toFixed(2),
-      cell_temperature_min: battery.cellTemperatureMin.toFixed(2),
-      cell_temperature_variance: battery.cellTemperatureVariance.toFixed(2),
-      cell_voltage_max: battery.cellVoltageMax.toFixed(2),
-      cell_voltage_min: battery.cellVoltageMin.toFixed(2),
-      cell_voltage_variance: battery.cellVoltageVariance.toFixed(2),
-      charge: battery.charge.toFixed(3),
-      model: battery.model,
+      ...commonStateMap(battery),
       module_amperage_max: battery.moduleAmperageMax.toFixed(2),
       module_amperage_min: battery.moduleAmperageMin.toFixed(2),
       module_amperage_variance: battery.moduleAmperageVariance.toFixed(2),
@@ -1053,18 +896,6 @@ const stateFns = {
       module_wattage_max: battery.moduleWattageMax.toFixed(2),
       module_wattage_min: battery.moduleWattageMin.toFixed(2),
       module_wattage_variance: battery.moduleWattageVariance.toFixed(2),
-      serial: battery.serial,
-      soc: battery.soc.toFixed(2),
-      time_to_empty:
-        battery.timeToEmpty !== 0
-          ? battery.timeToEmpty.toFixed(2)
-          : "unavailable",
-      time_to_full:
-        battery.timeToFull !== 0
-          ? battery.timeToFull.toFixed(2)
-          : "unavailable",
-      voltage: battery.voltage.toFixed(1),
-      wattage: battery.wattage.toFixed(2),
     };
 
     const topicPrefix = `${mqttPrefix}/battery/${battery.serial}`;
@@ -1080,46 +911,29 @@ const stateFns = {
       await stateFns.publishModule(mqttConn, topicPrefix, module);
     }
   },
+
   publishModule: async (
     mqttConn: Mqtt.AsyncMqttClient,
     mqttPrefix: string,
     module: Module
   ) => {
     const stateMap = {
-      amperage: module.amperage.toFixed(2),
-      capacity: module.capacity.toFixed(2),
-      cell_temperature_max: module.cellTemperatureMax.toFixed(2),
-      cell_temperature_min: module.cellTemperatureMin.toFixed(2),
-      cell_temperature_variance: module.cellTemperatureVariance.toFixed(2),
-      cell_voltage_max: module.cellVoltageMax.toFixed(2),
-      cell_voltage_min: module.cellVoltageMin.toFixed(2),
-      cell_voltage_variance: module.cellVoltageVariance.toFixed(2),
-      charge: module.charge.toFixed(2),
+      ...commonStateMap(module),
       cycle: module.cycle,
       manufacturer_name: module.manufacturerName,
-      model: module.model,
-      serial: module.serial,
-      soc: module.soc.toFixed(2),
-      time_to_empty:
-        module.timeToEmpty !== 0
-          ? module.timeToEmpty.toFixed(2)
-          : "unavailable",
-      time_to_full:
-        module.timeToFull !== 0 ? module.timeToFull.toFixed(2) : "unavailable",
-      voltage: module.voltage.toFixed(1),
-      wattage: module.wattage.toFixed(2),
-
       ...Object.fromEntries(
-        module.cells.flatMap((cell) => {
-          const cellNumberString = cell.cellNumber.toString().padStart(2, "0");
-          return [
+        module.cells
+          .map((cell) => ({
+            cell,
+            cellNumberString: cell.cellNumber.toString().padStart(2, "0"),
+          }))
+          .flatMap(({ cell, cellNumberString }) => [
             [
               `cells/${cellNumberString}/temperature`,
               cell.temperature.toFixed(1),
             ],
             [`cells/${cellNumberString}/voltage`, cell.voltage.toFixed(1)],
-          ];
-        })
+          ])
       ),
     };
     for (const [key, value] of Object.entries(stateMap)) {
@@ -1135,6 +949,7 @@ const stateFns = {
 const main = async () => {
   const haPrefix = process.env.HOME_ASSISTANT_DISCOVERY_PREFIX!;
   const mqttPrefix = process.env.MQTT_PREFIX!;
+  const mqttStatusTopic = `${mqttPrefix}/status`;
   const serverCount = parseInt(process.env.SERVER_COUNT!);
   const servers = new Array(serverCount)
     .fill(undefined)
@@ -1145,7 +960,18 @@ const main = async () => {
   log.info(`begin setup`);
 
   log.info(`Connecting to MQTT`);
-  const mqttConn = await Mqtt.connectAsync(process.env.MQTT_URL!);
+  const mqttConn = await Mqtt.connectAsync(process.env.MQTT_URL!, {
+    will: {
+      payload: "offline",
+      qos: 0,
+      retain: true,
+      topic: mqttStatusTopic,
+    },
+  });
+  await mqttConn.publish(mqttStatusTopic, "online", {
+    qos: 0,
+    retain: true,
+  });
   log.info(`Connected to MQTT`);
 
   log.info(`Connecting to MODBUS`);
