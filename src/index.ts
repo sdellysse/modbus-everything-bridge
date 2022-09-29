@@ -92,8 +92,8 @@ const queryModbusServer = async (modbusConn: Modbus, server: number) => {
           cycle: 1.0 * numberAt(5048, 1, "unsigned"),
           chargeVoltageLimit: 0.1 * numberAt(5049, 1, "unsigned"),
           dischargeVoltageLimit: 0.1 * numberAt(5050, 1, "unsigned"),
-          chargeCurrentLimit: 0.01 * numberAt(5051, 1, "signed"),
-          dischargeCurrentLimit: 0.01 * numberAt(5052, 1, "signed"),
+          chargeAmerpageLimit: 0.01 * numberAt(5051, 1, "signed"),
+          dischargeAmperageLimit: 0.01 * numberAt(5052, 1, "signed"),
         }
     )),
 
