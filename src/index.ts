@@ -854,6 +854,7 @@ const homeAssistantConfigFns = {
   },
 };
 
+const states = <Record<string, string | Buffer>>{};
 const commonStateMap = (bm: Battery | Module) => ({
   amperage: bm.amperage.toFixed(2),
   capacity: bm.capacity.toFixed(3),
@@ -903,8 +904,14 @@ const stateFns = {
       const topic = `${topicPrefix}/${key}`;
       const payload = `${value}`;
 
+      if (states[topic] === payload) {
+        log.info(`state has not changed, skipping pub: ${topic}: ${payload}`);
+        continue;
+      }
+
       log.info(`publishing: ${topic}: ${payload}`);
-      await mqttConn.publish(topic, payload);
+      await mqttConn.publish(topic, payload, { retain: true });
+      states[topic] = payload;
     }
 
     for (const module of battery.modules) {
@@ -940,8 +947,14 @@ const stateFns = {
       const topic = `${mqttPrefix}/modules/${module.serial}/${key}`;
       const payload = `${value}`;
 
+      if (states[topic] === payload) {
+        log.info(`state has not changed, skipping pub: ${topic}: ${payload}`);
+        continue;
+      }
+
       log.info(`publishing: ${topic}: ${payload}`);
-      await mqttConn.publish(topic, payload);
+      await mqttConn.publish(topic, payload, { retain: true });
+      states[topic] = payload;
     }
   },
 };
