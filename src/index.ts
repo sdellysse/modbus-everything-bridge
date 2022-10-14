@@ -448,7 +448,7 @@ const commonMappings = {
     name: "Time To Empty",
     config: {
       device_class: "duration",
-      icon: "mdi:timer-remove",
+      icon: "mdi:battery-clock-outline",
       unit_of_measurement: "h",
     },
   },
@@ -458,7 +458,7 @@ const commonMappings = {
     name: "Time To Full",
     config: {
       device_class: "duration",
-      icon: "mdi:timer-check",
+      icon: "mdi:battery-clock",
       unit_of_measurement: "h",
     },
   },
@@ -905,7 +905,6 @@ const stateFns = {
       const payload = `${value}`;
 
       if (states[topic] === payload) {
-        log.info(`state has not changed, skipping pub: ${topic}: ${payload}`);
         continue;
       }
 
@@ -948,7 +947,6 @@ const stateFns = {
       const payload = `${value}`;
 
       if (states[topic] === payload) {
-        log.info(`state has not changed, skipping pub: ${topic}: ${payload}`);
         continue;
       }
 
