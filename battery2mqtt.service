@@ -1,10 +1,10 @@
 [Service]
 Type=simple
 Restart=always
-User=user
-Group=user
-WorkingDirectory=/home/user/src/battery2mqtt
-ExecStart=/usr/bin/fish -ic 'npm start'
+User=root
+Group=root
+WorkingDirectory=/root/src/mqtt-bridges
+ExecStart=/usr/bin/fish -ic 'npx ts-node src/battery2mqtt.ts'
 
 [Install]
 WantedBy=multi-user.target

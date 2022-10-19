@@ -1,0 +1,5 @@
+# https://github.com/seatgeek/bash-aptfile
+
+update
+package "build-essential"
+

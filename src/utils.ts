@@ -18,6 +18,14 @@ export const log = Object.assign(
   }
 );
 
+export const pMapSeries = async <Item, Result>(items: Array<Item>, fn: ((item: Item) => Promise<Result>) ) => {
+    const retval: Array<Result> = [];
+    for (const item of items) {
+        retval.push(await fn(item));
+    }
+    return retval;
+}
+
 type queryModbusFnBag = {
   numberAt: (
     register: number,
