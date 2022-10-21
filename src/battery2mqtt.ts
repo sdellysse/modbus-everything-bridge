@@ -5,7 +5,7 @@ import { log, queryModbus, uniqueStrings } from "./utils";
 
 process.env.MODBUSTCP_HOST = "scratch0.lan";
 process.env.MODBUSTCP_PORT = "502";
-process.env.MQTT_URL = "tcp://docker0.lan:1883";
+process.env.MQTT_URL = "tcp://docker.lan:1883";
 process.env.MQTT_PREFIX = "battery2mqtt";
 process.env.SERVER_COUNT = "4";
 process.env.SERVER_1_MODBUS_ADDRESS = "48";
