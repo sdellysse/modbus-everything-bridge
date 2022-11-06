@@ -2,8 +2,13 @@
   "cSpell.words": [
     "alarminfo",
     "batterymodule",
+    "batterys",
+    "Emptys",
     "homeassistant",
     "modbus",
-    "MODBUSTCP"
+    "MODBUSTCP",
+    "renogy",
+    "retval",
+    "socs"
   ]
 }
