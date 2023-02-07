@@ -1,19 +1,54 @@
 import Mqtt from "async-mqtt";
 import { bufferParsersOf, log } from "../utils";
+import { z } from "zod";
+import util from "node:util";
+import fs from "node:fs/promises";
 
 const main = async () => {
-  const mqttPrefix = "renogy";
-  const haPrefix = "homeassistant/discovery";
+  const argsSchema = z.object({
+    values: z.object({
+      config: z.string().default(`${__dirname}/../etc/renogy.json`),
+    }),
+    positionals: z.array(z.never()).length(0),
+  });
 
-  const mqttConn = await Mqtt.connectAsync("tcp://service-mqtt.lan:1883", {
+  const args = argsSchema.parse(
+    util.parseArgs({
+      options: {
+        config: {
+          short: "c",
+          type: "string",
+        },
+      },
+    })
+  );
+
+  const configSchema = z.object({
+    mqtt: z.object({
+      prefix: z.string(),
+      server: z.string(),
+      source: z.object({
+        prefixes: z.array(z.string()),
+      }),
+      homeAssistant: z.object({
+        discoveryPrefix: z.string(),
+      }),
+    }),
+  });
+
+  const config = configSchema.parse(
+    JSON.parse(await fs.readFile(args.values.config, { encoding: "utf-8" }))
+  );
+
+  const mqttConn = await Mqtt.connectAsync(config.mqtt.server, {
     will: {
       payload: "offline",
       qos: 0,
       retain: true,
-      topic: `${mqttPrefix}/status`,
+      topic: `${config.mqtt.prefix}/status`,
     },
   });
-  await mqttConn.publish(`${mqttPrefix}/status`, "online", {
+  await mqttConn.publish(`${config.mqtt.prefix}/status`, "online", {
     qos: 0,
     retain: true,
   });
@@ -38,27 +73,54 @@ const main = async () => {
     // log.info(`published ${topic}`);
   };
 
-  const serverSerialMap: Record<number, string> = {};
+  const serialCache: Record<string, string> = {};
+
   const mqttState: Record<string, Buffer> = {};
   const onIntervalFn = async () => {
-    for (const server of [48, 49, 50, 51]) {
-      if (serverSerialMap[server] === undefined) {
-        const block = mqttState[`modbus/blocks/${server}::5100..5142`];
+    const serverPrefixes: Array<string> = [];
+    for (const [topic, payload] of Object.entries(mqttState)) {
+      if (/\/servers\/[0-9]+\/attributes\.json$/.test(topic)) {
+        const serverPrefix = topic.replace(/\/attributes\.json$/, "");
 
-        if (block !== undefined) {
-          serverSerialMap[server] = bufferParsersOf(block, 5100).asciiAt(
+        const json = JSON.parse(payload.toString("utf-8"));
+        if (json["renogy_battery"] === true) {
+          serverPrefixes.push(serverPrefix);
+        }
+      }
+    }
+
+    for (const serverPrefix of serverPrefixes) {
+      if (serialCache[serverPrefix] === undefined) {
+        const serialAttribute = JSON.parse(
+          mqttState[`${serverPrefix}/attributes.json`]?.toString("utf-8") ?? ""
+        )?.["serial"];
+        const queryData =
+          mqttState[`${serverPrefix}/queries/register_5100_length_42/data`];
+
+        if (false) {
+        } else if (typeof serialAttribute === "string") {
+          serialCache[serverPrefix] = serialAttribute;
+        } else if (queryData !== undefined) {
+          serialCache[serverPrefix] = bufferParsersOf(queryData, 5100).asciiAt(
             5110,
             8
           );
         }
+
+        if (serialCache[serverPrefix] !== undefined) {
+          console.log(
+            `associating prefix "${serverPrefix}" with serial "${serialCache[serverPrefix]}"`
+          );
+        }
       }
 
-      const serial = serverSerialMap[server];
+      const serial = serialCache[serverPrefix];
       if (serial === undefined) {
         continue;
       }
 
-      const block5000To5034 = mqttState[`modbus/blocks/${server}::5000..5034`];
+      const block5000To5034 =
+        mqttState[`${serverPrefix}/queries/register_5000_length_34/data`];
       if (block5000To5034 !== undefined) {
         const { numberAt } = bufferParsersOf(block5000To5034, 5000);
 
@@ -70,16 +132,16 @@ const main = async () => {
         ];
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/cell_voltage_maximum`,
+          `${config.mqtt.prefix}/batteries/${serial}/cell_voltage_maximum`,
           `${Math.max(...cellVoltages)}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_voltage_maximum/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_voltage_maximum/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_voltage_maximum/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_voltage_maximum/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -92,7 +154,7 @@ const main = async () => {
               icon: "mdi:flash-triangle-outline",
               name: `Renogy Battery ${serial} Cell Voltage Maximum`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/cell_voltage_maximum`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/cell_voltage_maximum`,
               unique_id: `renogy_battery_${serial}_cell_voltage_maximum`,
               unit_of_measurement: "V",
             })
@@ -100,16 +162,16 @@ const main = async () => {
         }
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/cell_voltage_minimum`,
+          `${config.mqtt.prefix}/batteries/${serial}/cell_voltage_minimum`,
           `${Math.min(...cellVoltages)}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_voltage_minimum/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_voltage_minimum/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_voltage_minimum/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_voltage_minimum/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -122,7 +184,7 @@ const main = async () => {
               icon: "mdi:flash-triangle-outline",
               name: `Renogy Battery ${serial} Cell Voltage Minimum`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/cell_voltage_minimum`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/cell_voltage_minimum`,
               unique_id: `renogy_battery_${serial}_cell_voltage_minimum`,
               unit_of_measurement: "V",
             })
@@ -130,16 +192,16 @@ const main = async () => {
         }
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/cell_voltage_variance`,
+          `${config.mqtt.prefix}/batteries/${serial}/cell_voltage_variance`,
           (Math.max(...cellVoltages) - Math.min(...cellVoltages)).toFixed(1)
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_voltage_variance/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_voltage_variance/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_voltage_variance/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_voltage_variance/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -152,7 +214,7 @@ const main = async () => {
               icon: "mdi:flash-triangle-outline",
               name: `Renogy Battery ${serial} Cell Voltage Variance`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/cell_voltage_variance`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/cell_voltage_variance`,
               unique_id: `renogy_battery_${serial}_cell_voltage_variance`,
               unit_of_measurement: "V",
             })
@@ -163,16 +225,16 @@ const main = async () => {
           const cellNumber = `${i + 1}`.padStart(2, "0");
 
           await mqttPublish(
-            `${mqttPrefix}/batteries/${serial}/cells/${cellNumber}/voltage`,
+            `${config.mqtt.prefix}/batteries/${serial}/cells/${cellNumber}/voltage`,
             `${cellVoltages[i]!}`
           );
           if (
             published[
-              `${haPrefix}/sensor/renogy_battery_${serial}_cell_${cellNumber}_voltage/config`
+              `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_${cellNumber}_voltage/config`
             ] === undefined
           ) {
             await mqttPublish(
-              `${haPrefix}/sensor/renogy_battery_${serial}_cell_${cellNumber}_voltage/config`,
+              `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_${cellNumber}_voltage/config`,
               JSON.stringify({
                 device: {
                   identifiers: [serial],
@@ -185,7 +247,7 @@ const main = async () => {
                 icon: "mdi:flash-triangle-outline",
                 name: `Renogy Battery ${serial} Cell ${cellNumber} Voltage`,
                 state_class: "measurement",
-                state_topic: `${mqttPrefix}/batteries/${serial}/cells/${cellNumber}/voltage`,
+                state_topic: `${config.mqtt.prefix}/batteries/${serial}/cells/${cellNumber}/voltage`,
                 unique_id: `renogy_battery_${serial}_cell_${cellNumber}_voltage`,
                 unit_of_measurement: "V",
               })
@@ -201,16 +263,16 @@ const main = async () => {
         ];
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/cell_temperature_maximum`,
+          `${config.mqtt.prefix}/batteries/${serial}/cell_temperature_maximum`,
           `${Math.max(...cellTemperatures)}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_temperature_maximum/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_temperature_maximum/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_temperature_maximum/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_temperature_maximum/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -223,7 +285,7 @@ const main = async () => {
               icon: "mdi:thermometer-chevron-up",
               name: `Renogy Battery ${serial} Cell Temperature Maximum`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/cell_temperature_maximum`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/cell_temperature_maximum`,
               unique_id: `renogy_battery_${serial}_cell_temperature_maximum`,
               unit_of_measurement: "°C",
             })
@@ -231,16 +293,16 @@ const main = async () => {
         }
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/cell_temperature_minimum`,
+          `${config.mqtt.prefix}/batteries/${serial}/cell_temperature_minimum`,
           `${Math.min(...cellTemperatures)}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_temperature_minimum/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_temperature_minimum/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_temperature_minimum/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_temperature_minimum/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -253,7 +315,7 @@ const main = async () => {
               icon: "mdi:thermometer-chevron-down",
               name: `Renogy Battery ${serial} Cell Temperature Minimum`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/cell_temperature_minimum`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/cell_temperature_minimum`,
               unique_id: `renogy_battery_${serial}_cell_temperature_minimum`,
               unit_of_measurement: "°C",
             })
@@ -261,18 +323,18 @@ const main = async () => {
         }
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/cell_temperature_variance`,
+          `${config.mqtt.prefix}/batteries/${serial}/cell_temperature_variance`,
           (
             Math.max(...cellTemperatures) - Math.min(...cellTemperatures)
           ).toFixed(1)
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_temperature_Variance/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_temperature_Variance/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_cell_temperature_Variance/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_temperature_Variance/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -285,7 +347,7 @@ const main = async () => {
               icon: "mdi:thermometer-minus",
               name: `Renogy Battery ${serial} Cell Temperature Minimum`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/cell_temperature_Variance`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/cell_temperature_Variance`,
               unique_id: `renogy_battery_${serial}_cell_temperature_Variance`,
               unit_of_measurement: "°C",
             })
@@ -296,16 +358,16 @@ const main = async () => {
           const cellNumber = `${i + 1}`.padStart(2, "0");
 
           await mqttPublish(
-            `${mqttPrefix}/batteries/${serial}/cells/${cellNumber}/temperature`,
+            `${config.mqtt.prefix}/batteries/${serial}/cells/${cellNumber}/temperature`,
             `${cellTemperatures[i]!}`
           );
           if (
             published[
-              `${haPrefix}/sensor/renogy_battery_${serial}_cell_${cellNumber}_temperature/config`
+              `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_${cellNumber}_temperature/config`
             ] === undefined
           ) {
             await mqttPublish(
-              `${haPrefix}/sensor/renogy_battery_${serial}_cell_${cellNumber}_temperature/config`,
+              `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_cell_${cellNumber}_temperature/config`,
               JSON.stringify({
                 device: {
                   identifiers: [serial],
@@ -318,7 +380,7 @@ const main = async () => {
                 icon: "mdi:thermometer",
                 name: `Renogy Battery ${serial} Cell ${cellNumber} Temperature`,
                 state_class: "measurement",
-                state_topic: `${mqttPrefix}/batteries/${serial}/cells/${cellNumber}/temperature`,
+                state_topic: `${config.mqtt.prefix}/batteries/${serial}/cells/${cellNumber}/temperature`,
                 unique_id: `renogy_battery_${serial}_cell_${cellNumber}_temperature`,
                 unit_of_measurement: "°C",
               })
@@ -327,7 +389,8 @@ const main = async () => {
         }
       }
 
-      const block5035To5053 = mqttState[`modbus/blocks/${server}::5035..5053`];
+      const block5035To5053 =
+        mqttState[`${serverPrefix}/queries/register_5035_length_18/data`];
       if (block5035To5053 !== undefined) {
         const { numberAt } = bufferParsersOf(block5035To5053, 5035);
 
@@ -335,16 +398,16 @@ const main = async () => {
           (0.01 * numberAt(5042, 1, "signed")).toFixed(2)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/amperage`,
+          `${config.mqtt.prefix}/batteries/${serial}/amperage`,
           `${amperage}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_amperage/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_amperage/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_amperage/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_amperage/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -356,7 +419,7 @@ const main = async () => {
               icon: "mdi:current-dc",
               name: `Renogy Battery ${serial} Amperage`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/amperage`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/amperage`,
               unique_id: `renogy_battery_${serial}_amperage`,
               unit_of_measurement: "A",
             })
@@ -367,16 +430,16 @@ const main = async () => {
           (0.1 * numberAt(5043, 1, "unsigned")).toFixed(1)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/voltage`,
+          `${config.mqtt.prefix}/batteries/${serial}/voltage`,
           `${voltage}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_voltage/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_voltage/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_voltage/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_voltage/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -388,7 +451,7 @@ const main = async () => {
               icon: "mdi:flash-triangle-outline",
               name: `Renogy Battery ${serial} Voltage`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/voltage`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/voltage`,
               unique_id: `renogy_battery_${serial}_voltage`,
               unit_of_measurement: "V",
             })
@@ -397,16 +460,16 @@ const main = async () => {
 
         const wattage = Number((amperage * voltage).toFixed(1));
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/wattage`,
+          `${config.mqtt.prefix}/batteries/${serial}/wattage`,
           `${wattage}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_wattage/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_wattage/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_wattage/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_wattage/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -418,7 +481,7 @@ const main = async () => {
               icon: "mdi:current-dc",
               name: `Renogy Battery ${serial} Wattage`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/wattage`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/wattage`,
               unique_id: `renogy_battery_${serial}_wattage`,
               unit_of_measurement: "W",
             })
@@ -429,16 +492,16 @@ const main = async () => {
           (0.001 * numberAt(5044, 2, "unsigned")).toFixed(3)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/charge`,
+          `${config.mqtt.prefix}/batteries/${serial}/charge`,
           (chargeAh * voltage).toFixed(1)
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_charge/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_charge/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_charge/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_charge/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -450,7 +513,7 @@ const main = async () => {
               icon: "mdi:battery-50",
               name: `Renogy Battery ${serial} Charge`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/charge`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/charge`,
               unique_id: `renogy_battery_${serial}_charge`,
               unit_of_measurement: "Wh",
             })
@@ -461,16 +524,16 @@ const main = async () => {
           (0.001 * numberAt(5046, 2, "unsigned")).toFixed(3)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/capacity`,
+          `${config.mqtt.prefix}/batteries/${serial}/capacity`,
           (capacityAh * voltage).toFixed(1)
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_capacity/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_capacity/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_capacity/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_capacity/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -482,7 +545,7 @@ const main = async () => {
               icon: "mdi:battery",
               name: `Renogy Battery ${serial} Capacity`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/capacity`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/capacity`,
               unique_id: `renogy_battery_${serial}_capacity`,
               unit_of_measurement: "Wh",
             })
@@ -490,14 +553,17 @@ const main = async () => {
         }
 
         const soc = Number((100.0 * (chargeAh / capacityAh)).toFixed(3));
-        await mqttPublish(`${mqttPrefix}/batteries/${serial}/soc`, `${soc}`);
+        await mqttPublish(
+          `${config.mqtt.prefix}/batteries/${serial}/soc`,
+          `${soc}`
+        );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_soc/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_soc/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_soc/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_soc/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -509,7 +575,7 @@ const main = async () => {
               icon: "mdi:percent",
               name: `Renogy Battery ${serial} SOC`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/soc`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/soc`,
               unique_id: `renogy_battery_${serial}_soc`,
               unit_of_measurement: "%",
             })
@@ -520,16 +586,16 @@ const main = async () => {
           (amperage > 0 ? (capacityAh - chargeAh) / amperage : 0).toFixed(2)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/time_to_full`,
+          `${config.mqtt.prefix}/batteries/${serial}/time_to_full`,
           `${timeToFull}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_time_to_full/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_time_to_full/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_time_to_full/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_time_to_full/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -541,7 +607,7 @@ const main = async () => {
               icon: "mdi:battery-clock",
               name: `Renogy Battery ${serial} Time To Full`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/time_to_full`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/time_to_full`,
               unique_id: `renogy_battery_${serial}_time_to_full`,
               unit_of_measurement: "h",
             })
@@ -552,16 +618,16 @@ const main = async () => {
           (amperage < 0 ? Math.abs(chargeAh / amperage) : 0).toFixed(2)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/time_to_empty`,
+          `${config.mqtt.prefix}/batteries/${serial}/time_to_empty`,
           `${timeToEmpty}`
         );
         if (
           published[
-            `${haPrefix}/sensor/renogy_battery_${serial}_time_to_empty/config`
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_time_to_empty/config`
           ] === undefined
         ) {
           await mqttPublish(
-            `${haPrefix}/sensor/renogy_battery_${serial}_time_to_empty/config`,
+            `${config.mqtt.homeAssistant.discoveryPrefix}/sensor/renogy_battery_${serial}_time_to_empty/config`,
             JSON.stringify({
               device: {
                 identifiers: [serial],
@@ -573,7 +639,7 @@ const main = async () => {
               icon: "mdi:battery-clock-outline",
               name: `Renogy Battery ${serial} Time To Empty`,
               state_class: "measurement",
-              state_topic: `${mqttPrefix}/batteries/${serial}/time_to_empty`,
+              state_topic: `${config.mqtt.prefix}/batteries/${serial}/time_to_empty`,
               unique_id: `renogy_battery_${serial}_time_to_empty`,
               unit_of_measurement: "h",
             })
@@ -581,86 +647,87 @@ const main = async () => {
         }
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/cycle`,
+          `${config.mqtt.prefix}/batteries/${serial}/cycle`,
           `${numberAt(5048, 1, "unsigned")}`
         );
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/charge_voltage_limit`,
+          `${config.mqtt.prefix}/batteries/${serial}/charge_voltage_limit`,
           (0.1 * numberAt(5049, 1, "unsigned")).toFixed(1)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/discharge_voltage_limit`,
+          `${config.mqtt.prefix}/batteries/${serial}/discharge_voltage_limit`,
           (0.1 * numberAt(5050, 1, "unsigned")).toFixed(1)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/charge_amerpage_limit`,
+          `${config.mqtt.prefix}/batteries/${serial}/charge_amerpage_limit`,
           (0.01 * numberAt(5051, 1, "signed")).toFixed(1)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/discharge_amperage_limit`,
+          `${config.mqtt.prefix}/batteries/${serial}/discharge_amperage_limit`,
           (0.01 * numberAt(5052, 1, "signed")).toFixed(1)
         );
       }
 
-      const block5100To5142 = mqttState[`modbus/blocks/${server}::5100..5142`];
+      const block5100To5142 =
+        mqttState[`${serverPrefix}/queries/register_5100_length_42/data`];
       if (block5100To5142 !== undefined) {
         const { asciiAt, numberAt } = bufferParsersOf(block5100To5142, 5100);
 
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/alarminfo_cell_voltage`,
+          `${config.mqtt.prefix}/batteries/${serial}/alarminfo_cell_voltage`,
           `${numberAt(5100, 2, "unsigned")}`
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/alarminfo_cell_temperature`,
+          `${config.mqtt.prefix}/batteries/${serial}/alarminfo_cell_temperature`,
           `${numberAt(5102, 2, "unsigned")}`
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/alarminfo_other`,
+          `${config.mqtt.prefix}/batteries/${serial}/alarminfo_other`,
           `${numberAt(5104, 2, "unsigned")}`
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/status1`,
+          `${config.mqtt.prefix}/batteries/${serial}/status1`,
           `${numberAt(5106, 1, "unsigned")}`
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/status2`,
+          `${config.mqtt.prefix}/batteries/${serial}/status2`,
           `${numberAt(5107, 1, "unsigned")}`
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/status3`,
+          `${config.mqtt.prefix}/batteries/${serial}/status3`,
           `${numberAt(5108, 1, "unsigned")}`
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/status_charge_discharge`,
+          `${config.mqtt.prefix}/batteries/${serial}/status_charge_discharge`,
           `${numberAt(5109, 1, "unsigned")}`
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/serial`,
-          asciiAt(5110, 8)
+          `${config.mqtt.prefix}/batteries/${serial}/serial`,
+          serial
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/manufacturer_version`,
+          `${config.mqtt.prefix}/batteries/${serial}/manufacturer_version`,
           asciiAt(5118, 1)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/mainline_version`,
+          `${config.mqtt.prefix}/batteries/${serial}/mainline_version`,
           asciiAt(5119, 2)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/communication_protocol_version`,
+          `${config.mqtt.prefix}/batteries/${serial}/communication_protocol_version`,
           asciiAt(5121, 1)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/model`,
+          `${config.mqtt.prefix}/batteries/${serial}/model`,
           asciiAt(5122, 8)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/software_version`,
+          `${config.mqtt.prefix}/batteries/${serial}/software_version`,
           asciiAt(5130, 2)
         );
         await mqttPublish(
-          `${mqttPrefix}/batteries/${serial}/manufacturer_name`,
+          `${config.mqtt.prefix}/batteries/${serial}/manufacturer_name`,
           asciiAt(5132, 10)
         );
       }
@@ -675,7 +742,11 @@ const main = async () => {
     mqttState[topic] = payload;
   });
 
-  mqttConn.subscribe(["modbus/blocks/#"]);
+  const subscribeTopics = config.mqtt.source.prefixes.map(
+    (prefix) => `${prefix}/#`
+  );
+  console.log(JSON.stringify({ subscribeTopics }, undefined, 4));
+  mqttConn.subscribe(subscribeTopics);
 };
 
 main().catch((error) => {

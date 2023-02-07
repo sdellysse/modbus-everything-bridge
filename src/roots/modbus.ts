@@ -1,18 +1,68 @@
 import Modbus from "modbus-serial";
 import Mqtt from "async-mqtt";
 import { wait } from "../utils";
+import { z } from "zod";
+import fs from "node:fs/promises";
+import util from "node:util";
 
 const main = async () => {
-  const mqttPrefix = "modbus";
-  const mqttConn = await Mqtt.connectAsync("tcp://service-mqtt.lan:1883", {
+  const argsSchema = z.object({
+    values: z.object({
+      config: z.string().default(`${__dirname}/../etc/modbus.json`),
+    }),
+    positionals: z.array(z.never()).length(0),
+  });
+
+  const args = argsSchema.parse(
+    util.parseArgs({
+      options: {
+        config: {
+          short: "c",
+          type: "string",
+        },
+      },
+    })
+  );
+
+  const configSchema = z.object({
+    mqtt: z.object({
+      prefix: z.string(),
+      server: z.string(),
+    }),
+    modbus: z.object({
+      type: z.literal("rtu"),
+      device: z.string(),
+      baudRate: z.number().default(9600),
+    }),
+
+    servers: z.array(
+      z.object({
+        address: z.number(),
+        attributes: z.unknown().optional(),
+        queries: z.array(
+          z.object({
+            interval: z.literal("continuous"),
+            register: z.number(),
+            length: z.number().default(1),
+          })
+        ),
+      })
+    ),
+  });
+
+  const config = configSchema.parse(
+    JSON.parse(await fs.readFile(args.values.config, { encoding: "utf-8" }))
+  );
+
+  const mqttConn = await Mqtt.connectAsync(config.mqtt.server, {
     will: {
       payload: "offline",
       qos: 0,
       retain: true,
-      topic: `${mqttPrefix}/status`,
+      topic: `${config.mqtt.prefix}/status`,
     },
   });
-  await mqttConn.publish(`${mqttPrefix}/status`, "online", {
+  await mqttConn.publish(`${config.mqtt.prefix}/status`, "online", {
     qos: 0,
     retain: true,
   });
@@ -35,38 +85,34 @@ const main = async () => {
   };
 
   const modbusConn = new Modbus();
-  await modbusConn.connectRTUBuffered("/dev/ttyModbusRtuUsb", {
-    baudRate: 9600,
-  });
+  if (false) {
+  } else if (config.modbus.type === "rtu") {
+    await modbusConn.connectRTUBuffered("/dev/ttyModbusRtuUsb", {
+      baudRate: config.modbus.baudRate,
+    });
+  } else {
+    const exhaustivenessCheck: never = config.modbus.type;
+    throw new Error(`Missing modbus init for type: ${exhaustivenessCheck}`);
+  }
 
   for (;;) {
-    const blocks = [
-      { server: 48, range: [5000, 5034] },
-      { server: 49, range: [5000, 5034] },
-      { server: 50, range: [5000, 5034] },
-      { server: 51, range: [5000, 5034] },
-      { server: 48, range: [5035, 5053] },
-      { server: 49, range: [5035, 5053] },
-      { server: 50, range: [5035, 5053] },
-      { server: 51, range: [5035, 5053] },
-      { server: 48, range: [5100, 5142] },
-      { server: 49, range: [5100, 5142] },
-      { server: 50, range: [5100, 5142] },
-      { server: 51, range: [5100, 5142] },
-    ];
-    for (const block of blocks) {
-      modbusConn.setID(block.server);
+    for (const server of config.servers) {
+      modbusConn.setID(server.address);
 
-      const topic = `${mqttPrefix}/blocks/${block.server}::${block.range[0]}..${block.range[1]}`;
-      const payload = (
-        await modbusConn.readHoldingRegisters(
-          block.range[0]!,
-          block.range[1]! - block.range[0]!
-        )
-      ).buffer;
+      await mqttPublish(
+        `${config.mqtt.prefix}/servers/${server.address}/attributes.json`,
+        Buffer.from(JSON.stringify(server.attributes ?? {}))
+      );
 
-      await mqttPublish(topic, payload);
-      await wait(10);
+      for (const query of server.queries) {
+        await mqttPublish(
+          `${config.mqtt.prefix}/servers/${server.address}/queries/register_${query.register}_length_${query.length}/data`,
+          (
+            await modbusConn.readHoldingRegisters(query.register, query.length)
+          ).buffer
+        );
+        await wait(10);
+      }
     }
   }
 };

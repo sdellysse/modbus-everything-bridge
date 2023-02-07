@@ -1,0 +1,106 @@
+{
+  "mqtt": {
+    "prefix": "modbus",
+    "server": "tcp://service-mqtt.lan:1883"
+  },
+  "modbus": {
+    "type": "rtu",
+    "device": "/dev/ttyModbusRtuUsb",
+    "baudRate": 9600
+  },
+  "servers": [
+    {
+      "address": 48,
+      "attributes": {
+        "renogy_battery": true
+      },
+      "queries": [
+        {
+          "interval": "continuous",
+          "register": 5000,
+          "length": 34
+        },
+        {
+          "interval": "continuous",
+          "register": 5035,
+          "length": 18
+        },
+        {
+          "interval": "continuous",
+          "register": 5100,
+          "length": 42
+        }
+      ]
+    },
+    {
+      "address": 50,
+      "attributes": {
+        "renogy_battery": true
+      },
+      "queries": [
+        {
+          "interval": "continuous",
+          "register": 5000,
+          "length": 34
+        },
+        {
+          "interval": "continuous",
+          "register": 5035,
+          "length": 18
+        },
+        {
+          "interval": "continuous",
+          "register": 5100,
+          "length": 42
+        }
+      ]
+    },
+    {
+      "address": 51,
+      "attributes": {
+        "renogy_battery": true
+      },
+      "queries": [
+        {
+          "interval": "continuous",
+          "register": 5000,
+          "length": 34
+        },
+        {
+          "interval": "continuous",
+          "register": 5035,
+          "length": 18
+        },
+        {
+          "interval": "continuous",
+          "register": 5100,
+          "length": 42
+        }
+      ]
+    },
+    {
+      "address": 52,
+      "attributes": {
+        "renogy_battery": true,
+        "serial": "21RBS1105152002938"
+      },
+      "queries": [
+        {
+          "interval": "continuous",
+          "register": 5000,
+          "length": 34
+        },
+        {
+          "interval": "continuous",
+          "register": 5035,
+          "length": 18
+        },
+        {
+          "interval": "continuous",
+          "register": 5100,
+          "length": 42
+        }
+      ]
+    }
+  ]
+}

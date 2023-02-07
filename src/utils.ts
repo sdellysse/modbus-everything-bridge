@@ -15,7 +15,6 @@ export const log = Object.assign(
   }
 );
 
-
 export const bufferParsersOf = (data: Buffer, startRegister: number) => {
   const offsetOf = (register: number) => {
     if (register < startRegister) {

@@ -1,0 +1,12 @@
+{
+  "mqtt": {
+    "prefix": "renogy",
+    "server": "tcp://service-mqtt.lan:1883",
+    "source": {
+      "prefixes": ["modbus"]
+    },
+    "homeAssistant": {
+      "discoveryPrefix": "homeassistant/discovery"
+    }
+  }
+}
