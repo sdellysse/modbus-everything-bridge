@@ -10,6 +10,40 @@
   },
   "servers": [
     {
+      "address": 0,
+      "attributes": {
+        "renogy_scc": true
+      },
+      "enabled": false,
+      "queries": [
+        {
+          "interval": "continuous",
+          "register": 10,
+          "length": 22
+        },
+        {
+          "interval": "continuous",
+          "register": 256,
+          "length": 10
+        },
+        {
+          "interval": "continuous",
+          "register": 266,
+          "length": 22
+        },
+        {
+          "interval": "continuous",
+          "register": 288,
+          "length": 4
+        },
+        {
+          "interval": "continuous",
+          "register": 57345,
+          "length": 15
+        }
+      ]
+    },
+    {
       "address": 48,
       "attributes": {
         "renogy_battery": true

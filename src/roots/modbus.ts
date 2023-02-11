@@ -39,8 +39,10 @@ const main = async () => {
       z.object({
         address: z.number(),
         attributes: z.unknown().optional(),
+        enabled: z.boolean().default(true),
         queries: z.array(
           z.object({
+            enabled: z.boolean().default(true),
             interval: z.literal("continuous"),
             register: z.number(),
             length: z.number().default(1),
@@ -97,6 +99,10 @@ const main = async () => {
 
   for (;;) {
     for (const server of config.servers) {
+      if (!server.enabled) {
+        continue;
+      }
+
       modbusConn.setID(server.address);
 
       await mqttPublish(
@@ -105,6 +111,10 @@ const main = async () => {
       );
 
       for (const query of server.queries) {
+        if (!query.enabled) {
+          continue;
+        }
+
         await mqttPublish(
           `${config.mqtt.prefix}/servers/${server.address}/queries/register_${query.register}_length_${query.length}/data`,
           (

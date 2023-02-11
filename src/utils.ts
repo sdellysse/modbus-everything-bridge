@@ -1,5 +1,3 @@
-import ModbusRTU from "modbus-serial";
-
 export const wait = (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
@@ -44,6 +42,26 @@ export const bufferParsersOf = (data: Buffer, startRegister: number) => {
     return fn(register);
   };
 
+  const upperByteAt = (register: number, signed: "signed" | "unsigned") => {
+    const fnMap = <const>{
+      unsigned: (register: number) => data.readUInt8(offsetOf(register)),
+      signed: (register: number) => data.readInt8(offsetOf(register)),
+    };
+
+    const fn = fnMap[`${signed}`];
+    return fn(register);
+  };
+
+  const lowerByteAt = (register: number, signed: "signed" | "unsigned") => {
+    const fnMap = <const>{
+      unsigned: (register: number) => data.readUInt8(offsetOf(register + 1)),
+      signed: (register: number) => data.readInt8(offsetOf(register + 1)),
+    };
+
+    const fn = fnMap[`${signed}`];
+    return fn(register);
+  };
+
   const asciiAt = (register: number, length: number) => {
     const startIndex = offsetOf(register);
     const endIndex = offsetOf(register) + length * 2;
@@ -52,7 +70,9 @@ export const bufferParsersOf = (data: Buffer, startRegister: number) => {
 
   return {
     asciiAt,
+    lowerByteAt,
     numberAt,
     offsetOf,
+    upperByteAt,
   };
 };
