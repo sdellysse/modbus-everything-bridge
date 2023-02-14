@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "modbus": "ts-node --transpileOnly ./src/roots/modbus.ts",
-    "renogy": "ts-node                 ./src/roots/renogy.ts",
-    "battery": "ts-node                ./src/roots/battery.ts"
+    "battery": "ts-node ./src/roots/battery.ts",
+    "modbus": "ts-node ./src/roots/modbus.ts",
+    "renogy-batteries": "ts-node ./src/roots/renogy-batteries.ts",
+    "renogy-solar-controllers": "ts-node ./src/roots/renogy-solar-controllers.ts"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +17,8 @@
     "modbus-serial": "^8.0.9",
     "ts-node": "^10.9.1",
     "typescript": "^4.9.5",
+    "winston": "^3.8.2",
+    "znv": "^0.3.2",
     "zod": "^3.20.2"
   },
   "devDependencies": {

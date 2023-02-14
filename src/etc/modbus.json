@@ -12,31 +12,36 @@
     {
       "address": 0,
       "attributes": {
-        "renogy_scc": true
+        "renogy_solar_controller": true
       },
       "enabled": false,
       "queries": [
         {
+          "name": "10_22",
           "interval": "continuous",
           "register": 10,
           "length": 22
         },
         {
+          "name": "256_10",
           "interval": "continuous",
           "register": 256,
           "length": 10
         },
         {
+          "name": "266_22",
           "interval": "continuous",
           "register": 266,
           "length": 22
         },
         {
+          "name": "288_4",
           "interval": "continuous",
           "register": 288,
           "length": 4
         },
         {
+          "name": "57345_15",
           "interval": "continuous",
           "register": 57345,
           "length": 15
@@ -46,93 +51,197 @@
     {
       "address": 48,
       "attributes": {
-        "renogy_battery": true
+        "cell_count": 4,
+        "is_renogy_battery": true
       },
       "queries": [
         {
+          "name": "cell_temperatures_and_voltages",
           "interval": "continuous",
           "register": 5000,
           "length": 34
         },
         {
+          "name": "counts",
           "interval": "continuous",
           "register": 5035,
-          "length": 18
+          "length": 14
         },
         {
+          "name": "limits",
+          "interval": "continuous",
+          "register": 5049,
+          "length": 4
+        },
+        {
+          "name": "status",
           "interval": "continuous",
           "register": 5100,
-          "length": 42
+          "length": 10
+        },
+        {
+          "name": "properties",
+          "interval": "continuous",
+          "register": 5110,
+          "length": 32
+        }
+      ]
+    },
+    {
+      "address": 49,
+      "attributes": {
+        "cell_count": 4,
+        "is_renogy_battery": true
+      },
+      "enabled": false,
+      "queries": [
+        {
+          "name": "cell_temperatures_and_voltages",
+          "interval": "continuous",
+          "register": 5000,
+          "length": 34
+        },
+        {
+          "name": "counts",
+          "interval": "continuous",
+          "register": 5035,
+          "length": 14
+        },
+        {
+          "name": "limits",
+          "interval": "continuous",
+          "register": 5049,
+          "length": 4
+        },
+        {
+          "name": "status",
+          "interval": "continuous",
+          "register": 5100,
+          "length": 10
+        },
+        {
+          "name": "properties",
+          "interval": "continuous",
+          "register": 5110,
+          "length": 32
         }
       ]
     },
     {
       "address": 50,
       "attributes": {
-        "renogy_battery": true
+        "cell_count": 4,
+        "is_renogy_battery": true
       },
       "queries": [
         {
+          "name": "cell_temperatures_and_voltages",
           "interval": "continuous",
           "register": 5000,
           "length": 34
         },
         {
+          "name": "counts",
           "interval": "continuous",
           "register": 5035,
-          "length": 18
+          "length": 14
         },
         {
+          "name": "limits",
+          "interval": "continuous",
+          "register": 5049,
+          "length": 4
+        },
+        {
+          "name": "status",
           "interval": "continuous",
           "register": 5100,
-          "length": 42
+          "length": 10
+        },
+        {
+          "name": "properties",
+          "interval": "continuous",
+          "register": 5110,
+          "length": 32
         }
       ]
     },
     {
       "address": 51,
       "attributes": {
-        "renogy_battery": true
+        "cell_count": 4,
+        "is_renogy_battery": true
       },
       "queries": [
         {
+          "name": "cell_temperatures_and_voltages",
           "interval": "continuous",
           "register": 5000,
           "length": 34
         },
         {
+          "name": "counts",
           "interval": "continuous",
           "register": 5035,
-          "length": 18
+          "length": 14
         },
         {
+          "name": "limits",
+          "interval": "continuous",
+          "register": 5049,
+          "length": 4
+        },
+        {
+          "name": "status",
           "interval": "continuous",
           "register": 5100,
-          "length": 42
+          "length": 10
+        },
+        {
+          "name": "properties",
+          "interval": "continuous",
+          "register": 5110,
+          "length": 32
         }
       ]
     },
     {
       "address": 52,
       "attributes": {
-        "renogy_battery": true,
+        "cell_count": 4,
+        "is_renogy_battery": true,
         "serial": "21RBS1105152002938"
       },
       "queries": [
         {
+          "name": "cell_temperatures_and_voltages",
           "interval": "continuous",
           "register": 5000,
           "length": 34
         },
         {
+          "name": "counts",
           "interval": "continuous",
           "register": 5035,
-          "length": 18
+          "length": 14
         },
         {
+          "name": "limits",
+          "interval": "continuous",
+          "register": 5049,
+          "length": 4
+        },
+        {
+          "name": "status",
           "interval": "continuous",
           "register": 5100,
-          "length": 42
+          "length": 10
+        },
+        {
+          "name": "properties",
+          "interval": "continuous",
+          "register": 5110,
+          "length": 32
         }
       ]
     }

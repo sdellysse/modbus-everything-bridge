@@ -262,7 +262,7 @@ const main = async () => {
     mqttState[topic] = payload;
   });
 
-  mqttConn.subscribe(["renogy/batteries/#"]);
+  mqttConn.subscribe(["renogy_batteries/#"]);
 };
 
 main().catch((error) => {
