@@ -1,0 +1,7 @@
+{
+    "recommendations": [
+        "coolbear.systemd-unit-file",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker"
+    ]
+}
