@@ -109,6 +109,7 @@ export default defaultExport;
 
 if (require.main === module) {
   (async () => {
+    
     const envSchema = (() => {
       const common = z.object({
         LOGLEVEL: z.string().default("info"),
