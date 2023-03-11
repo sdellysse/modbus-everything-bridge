@@ -60,7 +60,7 @@ if (require.main === module) {
   (async () => {
     const envSchema = z.object({
       LOGLEVEL: z.string().default("info"),
-      HTTP_PORT: z.string().default("5280").transform(Number).pipe(z.number()),
+      HTTP_PORT: z.string().default("21224").transform(Number).pipe(z.number()),
       MODBUS_URI: z.string(),
     });
 
