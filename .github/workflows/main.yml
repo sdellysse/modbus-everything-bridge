@@ -30,4 +30,4 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/modbus-everything-bridge:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/modbus-everything-bridge:latest, ${{ secrets.DOCKERHUB_USERNAME }}/modbus-everything-bridge:${{ env.NOW }}
