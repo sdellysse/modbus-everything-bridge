@@ -1,0 +1,7 @@
+version: "3"
+
+tasks:
+  start:dev:
+    cmds:
+      - make node_modules
+      - pnpm exec tsx src/index.ts

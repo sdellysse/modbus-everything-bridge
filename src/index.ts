@@ -2,88 +2,88 @@ import winston from "winston";
 import { z } from "zod";
 import * as modbus from "./modbus";
 import * as http from "./http";
+import * as cmdTs from "cmd-ts";
 
-type OptionsDefaultExport = {
-  http: {
-    port: number;
-  };
-  logger: winston.Logger;
-  modbus: {
-    uri: string;
-  };
-};
-const defaultExport = async ({ logger, ...options }: OptionsDefaultExport) => {
-  logger.debug("options", options);
+const cli = cmdTs.command({
+	name: "modbus-http",
 
-  logger.debug(`connection to modbus via ${options.modbus.uri}`);
-  const modbusConn = await modbus.connect({
-    logger,
-    uri: options.modbus.uri,
-  });
-  logger.info(`connected to modbus via ${options.modbus.uri}`);
-  const useConn = modbus.interlockConn(modbusConn);
+	args: {
+		httpPort: cmdTs.option({
+			type: cmdTs.number,
+			long: "http-port",
+			defaultValue: 21224,
+			defaultValueIsSerializable: true,
+		}),
 
-  logger.debug(`starting http server on port ${options.http.port}`);
-  const httpServer = await http.listen(options.http.port);
-  logger.info(`started http server on port ${options.http.port}`);
+		logLevel: cmdTs.option({
+			type: cmdTs.string,
+			long: "log-level",
+			defaultValue: "info",
+			defaultValueIsSerializable: true,
+		}),
 
-  httpServer.post("/read_register", async (req, res) => {
-    logger.debug(`http: POST /read_register: ${JSON.stringify(req.body)}`);
+		modbusUri: cmdTs.option({
+			type: cmdTs.string,
+			long: "modbus-uri",
+		}),
+	},
 
-    const body = z
-      .object({
-        address: z.number(),
-        register: z.number(),
-        length: z.number(),
-      })
-      .parse(req.body);
+	handler: async (args) => {
+		const logger = winston.createLogger({
+			level: args.loglevel
+			format: winston.format.simple(),
+			transports: [new winston.transports.Console()],
+		});
 
-    const bytes = await useConn(
-      logger,
-      async (conn) =>
-        await modbus.readRegister({
-          ...body,
-          conn,
-          logger,
-        })
-    );
+		logger.debug("args", args);
 
-    res.status(200);
-    res.header("Content-Type", "application/octet-stream");
-    res.send(bytes);
-    res.end();
-  });
-};
-export default defaultExport;
+		logger.debug(`connection to modbus via ${args.modbusUri}`);
+		const modbusConn = await modbus.connect({
+			logger,
+			uri: args.modbusUri,
+		});
+		logger.info(`connected to modbus via ${args.modbusUri}`);
 
-if (require.main === module) {
-  (async () => {
-    const envSchema = z.object({
-      LOGLEVEL: z.string().default("info"),
-      HTTP_PORT: z.string().default("21224").transform(Number).pipe(z.number()),
-      MODBUS_URI: z.string(),
-    });
+		const useConn = modbus.interlockConn(modbusConn);
 
-    const env = envSchema.parse(process.env);
+		logger.debug(`starting http server on port ${args.httpPort}`);
+		const httpServer = await http.listen(args.httpPort);
+		logger.info(`started http server on port ${args.httpPort}`);
 
-    const logger = winston.createLogger({
-      level: env.LOGLEVEL,
-      format: winston.format.simple(),
-      transports: [new winston.transports.Console()],
-    });
+		httpServer.route({
+			method: "POST",
+			path: "/read_register",
+			
+			schemas: {
+				body: z.object({
+					address: z.number(),
+					register: z.number(),
+					length: z.number(),
+				}),
+			},
 
-    await defaultExport({
-      logger,
-      modbus: {
-        uri: env.MODBUS_URI,
-      },
-      http: {
-        port: env.HTTP_PORT,
-      },
-    });
-  })().catch((error) => {
-    console.log(error);
-    console.log(JSON.stringify(error, undefined, 4));
-    process.exit(1);
-  });
-}
+			handler: async (req) => {
+				const bytes = await useConn(
+					logger,
+					async (conn) => await modbus.readRegister({
+						...req.bodyParams,
+						conn,
+						logger,
+					}),
+				);
+
+				return {
+					code: 200,
+					headers: [
+						["Content-Type", "application/octet-stream"],
+						["Content-Length", bytes.length],
+					],
+					body: bytes,
+				};
+			},
+		});
+	},
+});
+
+cmdTs.run(cmdTs.binary(cli), process.argv)
+
