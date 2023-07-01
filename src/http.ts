@@ -78,7 +78,7 @@ export const listen = async (port: number) => {
 
 		return express.all(path, async (req, res, next) => {
 			try {
-				if (req.method.toUpperCase() !== method) {
+				if (req.method.toUpperCase() !== method.toUpperCase()) {
 					return;
 				}
 
